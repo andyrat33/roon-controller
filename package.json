@@ -1,0 +1,17 @@
+{
+  "name": "roon-controller",
+  "version": "1.0.0",
+  "description": "Roon REST API extension for Cowork/Claude control",
+  "main": "extension.js",
+  "scripts": {
+    "start": "node extension.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "node-roon-api":           "RoonLabs/node-roon-api",
+    "node-roon-api-browse":    "RoonLabs/node-roon-api-browse",
+    "node-roon-api-transport": "RoonLabs/node-roon-api-transport",
+    "node-roon-api-settings":  "RoonLabs/node-roon-api-settings",
+    "node-roon-api-status":    "RoonLabs/node-roon-api-status"
+  }
+}

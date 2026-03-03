@@ -1,0 +1,5 @@
+node_modules/
+.roon/
+*.log
+.env
+.DS_Store

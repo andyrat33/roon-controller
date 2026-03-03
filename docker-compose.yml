@@ -1,0 +1,26 @@
+version: "3.8"
+
+services:
+  roon-controller:
+    image: roon-controller:latest
+    # Build locally on QNAP, or push to a registry first
+    build: .
+    container_name: roon-controller
+    restart: unless-stopped
+
+    # HOST NETWORK is required so Roon's SOOD discovery (UDP multicast)
+    # can find the Roon Core on your LAN.
+    # This means the API will be available on the QNAP's own IP, port 3001.
+    network_mode: host
+
+    environment:
+      - TZ=Europe/London
+      - PORT=3001
+
+    # Persist the Roon authorisation token so you don't re-authorise
+    # every time the container restarts
+    volumes:
+      - roon_auth:/app/.roon
+
+volumes:
+  roon_auth:
