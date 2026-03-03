@@ -21,6 +21,9 @@ services:
     # every time the container restarts
     volumes:
       - roon_auth:/app/.roon
+      # Mount extension.js from host so you can update it with just "docker restart"
+      # (no rebuild needed after changes)
+      - ./extension.js:/app/extension.js:ro
 
 volumes:
   roon_auth:

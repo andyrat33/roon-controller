@@ -111,44 +111,58 @@ app.get('/api/zones', (req, res) => {
 
 // ─── Search ───────────────────────────────────────────────────
 // GET /api/search?q=<query>[&type=tracks|albums|artists|composers]
+// Each category gets its own fresh session so item_keys stay valid.
 app.get('/api/search', (req, res) => {
   if (!requireCore(res)) return;
   const { q, type } = req.query;
   if (!q) return res.status(400).json({ error: 'Missing ?q= parameter' });
 
-  const msKey = `search-${Date.now()}-${Math.random()}`;
-
-  _browse.browse({ hierarchy: 'search', input: q, multi_session_key: msKey }, (err, r) => {
+  // Step 1: one session just to discover which categories exist
+  const discoverKey = `search-discover-${Date.now()}-${Math.random()}`;
+  _browse.browse({ hierarchy: 'search', input: q, multi_session_key: discoverKey }, (err) => {
     if (err) return res.status(500).json({ error: String(err) });
 
-    _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 100, offset: 0 }, (err, listR) => {
+    _browse.load({ hierarchy: 'search', multi_session_key: discoverKey, count: 100, offset: 0 }, (err, listR) => {
       if (err) return res.status(500).json({ error: String(err) });
 
-      // listR.items = top-level categories (Artists, Albums, Tracks, …)
+      const categories = (listR.items || []).filter(cat => {
+        if (type && !cat.title.toLowerCase().includes(type.toLowerCase())) return false;
+        return true;
+      });
+
+      if (categories.length === 0) return res.json({});
+
+      // Step 2: for each category, open a fresh session, re-search, navigate into that category
       const results = {};
-      const pending = [];
+      const pending = categories.map(cat => new Promise(resolve => {
+        const catKey = `search-${cat.title}-${Date.now()}-${Math.random()}`;
 
-      listR.items.forEach(cat => {
-        // Optional type filter
-        if (type && !cat.title.toLowerCase().includes(type.toLowerCase())) return;
-
-        pending.push(new Promise(resolve => {
-          const catKey = `${msKey}-${cat.title}`;
-          _browse.browse({ hierarchy: 'search', item_key: cat.item_key, multi_session_key: catKey }, (err) => {
+        _browse.browse({ hierarchy: 'search', input: q, multi_session_key: catKey }, (err) => {
+          if (err) return resolve();
+          _browse.load({ hierarchy: 'search', multi_session_key: catKey, count: 100, offset: 0 }, (err, freshR) => {
             if (err) return resolve();
-            _browse.load({ hierarchy: 'search', multi_session_key: catKey, count: 50, offset: 0 }, (err, catR) => {
+
+            // Find same category by title in this fresh session
+            const freshCat = (freshR.items || []).find(i => i.title === cat.title);
+            if (!freshCat) return resolve();
+
+            // Navigate into it — item_key is now valid for this session
+            _browse.browse({ hierarchy: 'search', item_key: freshCat.item_key, multi_session_key: catKey }, (err) => {
               if (err) return resolve();
-              results[cat.title] = (catR.items || []).map(i => ({
-                title:    i.title,
-                subtitle: i.subtitle,
-                item_key: i.item_key,
-                hint:     i.hint
-              }));
-              resolve();
+              _browse.load({ hierarchy: 'search', multi_session_key: catKey, count: 50, offset: 0 }, (err, catR) => {
+                if (err) return resolve();
+                results[cat.title] = (catR.items || []).map(i => ({
+                  title:    i.title,
+                  subtitle: i.subtitle,
+                  item_key: i.item_key,
+                  hint:     i.hint
+                }));
+                resolve();
+              });
             });
           });
-        }));
-      });
+        });
+      }));
 
       Promise.all(pending).then(() => res.json(results));
     });
@@ -181,6 +195,222 @@ app.get('/api/browse', (req, res) => {
           item_key: i.item_key,
           hint:     i.hint          // 'action_list' | 'list' | 'header' etc.
         }))
+      });
+    });
+  });
+});
+
+// ─── TIDAL Search ─────────────────────────────────────────────
+// GET /api/tidal/search?q=<query>
+// Navigates Root → TIDAL → Search within a single session so item_keys carry over
+app.get('/api/tidal/search', (req, res) => {
+  if (!requireCore(res)) return;
+  const { q } = req.query;
+  if (!q) return res.status(400).json({ error: 'Missing ?q= parameter' });
+
+  const msKey = `tidal-${Date.now()}-${Math.random()}`;
+
+  // Helper: browse then immediately load, reusing same session
+  function nav(browseOpts, loadCount, cb) {
+    _browse.browse({ ...browseOpts, multi_session_key: msKey }, (err, bR) => {
+      if (err) return cb(err);
+      _browse.load({ hierarchy: 'browse', multi_session_key: msKey, count: loadCount, offset: 0 }, (err, lR) => {
+        if (err) return cb(err);
+        cb(null, bR, lR);
+      });
+    });
+  }
+
+  // Step 1: Root
+  nav({ hierarchy: 'browse' }, 20, (err, _, rootR) => {
+    if (err) return res.status(500).json({ error: String(err) });
+
+    const tidalItem = (rootR.items || []).find(i => i.title === 'TIDAL');
+    if (!tidalItem) return res.status(404).json({ error: 'TIDAL not found — is it connected in Roon?' });
+
+    // Step 2: TIDAL home
+    nav({ hierarchy: 'browse', item_key: tidalItem.item_key }, 20, (err, _, tidalR) => {
+      if (err) return res.status(500).json({ error: String(err) });
+
+      const searchItem = (tidalR.items || []).find(i =>
+        i.title.toLowerCase() === 'search' || i.hint === 'action'
+      );
+      if (!searchItem) return res.json({ debug: 'No search entry in TIDAL, items found:', items: tidalR.items });
+
+      // Step 3: Search with input
+      nav({ hierarchy: 'browse', item_key: searchItem.item_key, input: q }, 50, (err, searchBR, searchR) => {
+        if (err) return res.status(500).json({ error: String(err) });
+
+        // Results may be categories (Artists, Albums, Tracks…) — load each one
+        const categories = (searchR.items || []).filter(i => i.hint === 'list');
+        if (categories.length === 0) {
+          return res.json({ query: q, results: {}, raw: searchR.items });
+        }
+
+        const results = {};
+        let pending = categories.length;
+
+        categories.forEach(cat => {
+          const catMsKey = `${msKey}-${cat.title}`;
+          _browse.browse({ hierarchy: 'browse', item_key: cat.item_key, multi_session_key: catMsKey }, (err) => {
+            if (err) { if (--pending === 0) res.json({ query: q, results }); return; }
+            _browse.load({ hierarchy: 'browse', multi_session_key: catMsKey, count: 30, offset: 0 }, (err, catR) => {
+              if (!err) {
+                results[cat.title] = (catR.items || []).map(i => ({
+                  title: i.title, subtitle: i.subtitle, item_key: i.item_key, hint: i.hint
+                }));
+              }
+              if (--pending === 0) res.json({ query: q, results });
+            });
+          });
+        });
+      });
+    });
+  });
+});
+
+// ─── Inspect Track Actions ────────────────────────────────────
+// GET /api/inspect?q=<query>  — returns every action Roon offers for the first result
+app.get('/api/inspect', (req, res) => {
+  if (!requireCore(res)) return;
+  const { q } = req.query;
+  if (!q) return res.status(400).json({ error: 'Missing ?q=' });
+
+  const msKey = `inspect-${Date.now()}-${Math.random()}`;
+  const log = [];
+
+  _browse.browse({ hierarchy: 'search', input: q, multi_session_key: msKey }, (err) => {
+    if (err) return res.status(500).json({ error: String(err) });
+    _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 100 }, (err, topR) => {
+      if (err) return res.status(500).json({ error: String(err) });
+
+      const tracksCat = (topR.items || []).find(i => i.title === 'Tracks');
+      if (!tracksCat) return res.json({ error: 'No Tracks category', top: topR.items.map(i=>i.title) });
+
+      log.push({ step: 'top categories', items: topR.items.map(i=>i.title) });
+
+      _browse.browse({ hierarchy: 'search', item_key: tracksCat.item_key, multi_session_key: msKey }, (err) => {
+        if (err) return res.status(500).json({ error: String(err) });
+        _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 10 }, (err, tracksR) => {
+          if (err) return res.status(500).json({ error: String(err) });
+
+          const first = (tracksR.items || [])[0];
+          log.push({ step: 'tracks list', items: tracksR.items.map(i=>({ title:i.title, hint:i.hint })) });
+          if (!first) return res.json({ log });
+
+          _browse.browse({ hierarchy: 'search', item_key: first.item_key, zone_or_output_id: Object.keys(_zones)[0], multi_session_key: msKey }, (err, r1) => {
+            if (err) return res.status(500).json({ error: String(err) });
+            log.push({ step: 'browse track', action: r1.action });
+
+            _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 10 }, (err, level1) => {
+              if (err) return res.status(500).json({ error: String(err) });
+              log.push({ step: 'level 1 items', items: level1.items.map(i=>({ title:i.title, hint:i.hint, item_key:i.item_key })) });
+
+              // Go one level deeper into first item
+              const next = (level1.items || [])[0];
+              if (!next) return res.json({ log });
+
+              _browse.browse({ hierarchy: 'search', item_key: next.item_key, zone_or_output_id: Object.keys(_zones)[0], multi_session_key: msKey }, (err, r2) => {
+                if (err) return res.status(500).json({ error: String(err) });
+                log.push({ step: 'browse level1[0]', action: r2.action });
+
+                _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 15 }, (err, level2) => {
+                  if (err) return res.status(500).json({ error: String(err) });
+                  log.push({ step: 'level 2 items', items: level2.items.map(i=>({ title:i.title, hint:i.hint })) });
+                  res.json({ log });
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+  });
+});
+
+// ─── Find and Play ────────────────────────────────────────────
+// POST /api/find-and-play  { zone_id, query, type?: "Tracks"|"Albums"|"Artists", index?: 0, action?: "Play Now" }
+// Searches and plays in a single session so item_keys stay valid throughout.
+app.post('/api/find-and-play', (req, res) => {
+  if (!requireCore(res)) return;
+  const { zone_id, query, type = 'Tracks', index = 0, action = 'Play Now' } = req.body;
+  if (!zone_id || !query) return res.status(400).json({ error: 'zone_id and query are required' });
+
+  // Normalise action aliases to match Roon's actual labels
+  const ACTION_MAP = { 'Add to Queue': 'Queue', 'Play Next': 'Add Next', 'Add to queue': 'Queue' };
+  const roonAction = ACTION_MAP[action] || action;
+
+  const msKey = `fap-${Date.now()}-${Math.random()}`;
+
+  // Step 1: Search
+  _browse.browse({ hierarchy: 'search', input: query, multi_session_key: msKey }, (err) => {
+    if (err) return res.status(500).json({ error: String(err) });
+
+    _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 100, offset: 0 }, (err, topR) => {
+      if (err) return res.status(500).json({ error: String(err) });
+
+      // Step 2: Find the requested category (Tracks, Albums, Artists…)
+      const cat = (topR.items || []).find(i => i.title === type);
+      if (!cat) return res.status(404).json({ error: `Category "${type}" not found in results`, available: topR.items.map(i => i.title) });
+
+      _browse.browse({ hierarchy: 'search', item_key: cat.item_key, multi_session_key: msKey }, (err) => {
+        if (err) return res.status(500).json({ error: String(err) });
+
+        _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 50, offset: 0 }, (err, catR) => {
+          if (err) return res.status(500).json({ error: String(err) });
+
+          const items = catR.items || [];
+          if (items.length === 0) return res.status(404).json({ error: `No results for "${query}" in ${type}` });
+
+          const target = items[Math.min(index, items.length - 1)];
+
+          // Step 3: Navigate to item to get action list
+          _browse.browse({ hierarchy: 'search', item_key: target.item_key, zone_or_output_id: zone_id, multi_session_key: msKey }, (err, r) => {
+            if (err) return res.status(500).json({ error: String(err) });
+
+            if (r.action !== 'list') {
+              return res.json({ success: true, playing: target.title, action: r.action });
+            }
+
+            _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 10, offset: 0 }, (err, actionR) => {
+              if (err) return res.status(500).json({ error: String(err) });
+
+              // Check if this is already an action list or an intermediate container
+              const directAction = (actionR.items || []).find(i => i.title === roonAction);
+              const isIntermediate = !directAction && actionR.items.length > 0 && actionR.items[0].hint === 'action_list';
+
+              if (isIntermediate) {
+                // Navigate into the container (e.g. the track title) to reach the real action list
+                const intermediate = actionR.items[0];
+                _browse.browse({ hierarchy: 'search', item_key: intermediate.item_key, multi_session_key: msKey }, (err, r2) => {
+                  if (err) return res.status(500).json({ error: String(err) });
+                  if (r2.action !== 'list') return res.json({ success: true, playing: `${target.title} — ${target.subtitle}`, action: r2.action });
+
+                  _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 15, offset: 0 }, (err, actionR2) => {
+                    if (err) return res.status(500).json({ error: String(err) });
+
+                    const pa2 = (actionR2.items || []).find(i => i.title === roonAction)
+                             || (roonAction === 'Play Now' ? (actionR2.items || []).find(i => i.title === 'Play Now') : null);
+                    if (!pa2) return res.status(404).json({ error: `Action "${roonAction}" not found`, available: actionR2.items.map(i => i.title) });
+
+                    _browse.browse({ hierarchy: 'search', item_key: pa2.item_key, zone_or_output_id: zone_id, multi_session_key: msKey }, (err, playR) => {
+                      if (err) return res.status(500).json({ error: String(err) });
+                      res.json({ success: true, playing: `${target.title} — ${target.subtitle}`, action: playR.action });
+                    });
+                  });
+                });
+                return;
+              }
+
+              if (!directAction) return res.status(404).json({ error: `Action "${roonAction}" not found`, available: (actionR.items||[]).map(i => i.title) });
+
+              _browse.browse({ hierarchy: 'search', item_key: directAction.item_key, zone_or_output_id: zone_id, multi_session_key: msKey }, (err, playR) => {
+                if (err) return res.status(500).json({ error: String(err) });
+                res.json({ success: true, playing: `${target.title} — ${target.subtitle}`, action: playR.action });
+              });
+            });
+          });
+        });
       });
     });
   });
