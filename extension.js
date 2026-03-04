@@ -512,70 +512,50 @@ app.get('/api/queue/:zone_id', (req, res) => {
   });
 });
 
-// ─── Playlist ─────────────────────────────────────────────────
+// ─── Playlist (Queue Builder) ──────────────────────────────────
 // POST /api/playlist
-// { name: "My Playlist", tracks: [{query, type?}], create?: false }
+// { name: "My Playlist", zone_id: "...", tracks: [{query, type?}] }
 //
-// Adds each track to the named Roon playlist via the browse API.
-// If create:true, attempts to create the playlist if it doesn't exist yet
-// (Roon exposes a "New Playlist" input in the Add to Playlist screen).
+// NOTE: Roon's Extension API does not expose playlist management actions
+// (Add to Playlist, Create Playlist) — only playback actions are available
+// to third-party extensions. This endpoint instead builds the playlist as
+// a Roon queue, which you can then save as a named playlist from within the
+// Roon app: Queue → ⋮ → Save Queue as Playlist.
 //
-// Tracks are processed sequentially — Roon's browse API is session-stateful
-// and parallel playlist writes cause race conditions.
+// The first track uses "Play Now" (starts playback, clears existing queue).
+// All subsequent tracks use "Queue" (appended in order).
+// Tracks are processed sequentially with a 2-second delay between calls.
 app.post('/api/playlist', async (req, res) => {
   if (!requireCore(res)) return;
-  const { name, tracks, create = false } = req.body;
-  if (!name)                                    return res.status(400).json({ error: 'name is required' });
+  const { name, zone_id, tracks } = req.body;
+  if (!zone_id)                                 return res.status(400).json({ error: 'zone_id is required' });
   if (!Array.isArray(tracks) || !tracks.length) return res.status(400).json({ error: 'tracks[] is required' });
 
-  const results        = [];
-  let   playlistExists = false; // set true once we've confirmed or created the playlist
+  const results      = [];
+  const ACTION_MAP   = { 'Add to Queue': 'Queue', 'Play Next': 'Add Next', 'Add to queue': 'Queue' };
 
-  // Helper: load action list for current browse position, handling the
-  // optional intermediate container Roon sometimes inserts (track title level).
-  function loadActionList(msKey, cb) {
-    _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 20 }, (err, actionR) => {
-      if (err) return cb(err);
-
-      const direct = (actionR.items || []).find(i => i.title === 'Add to Playlist');
-      if (direct) return cb(null, direct);
-
-      // Possible intermediate container (hint === 'action_list')
-      const mid = (actionR.items || []).find(i => i.hint === 'action_list');
-      if (!mid) return cb(null, null);
-
-      _browse.browse({ hierarchy: 'search', item_key: mid.item_key, multi_session_key: msKey }, (err) => {
-        if (err) return cb(err);
-        _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 20 }, (err, r2) => {
-          if (err) return cb(err);
-          cb(null, (r2.items || []).find(i => i.title === 'Add to Playlist') || null);
-        });
-      });
-    });
-  }
-
-  for (const track of tracks) {
-    const { query, type = 'Tracks' } = track;
+  for (let i = 0; i < tracks.length; i++) {
+    const { query, type = 'Tracks' } = tracks[i];
     if (!query) { results.push({ query, status: 'skipped', reason: 'missing query' }); continue; }
 
-    await new Promise(resolve => {
-      const msKey = `pl-${Date.now()}-${Math.random()}`;
+    const action    = i === 0 ? 'Play Now' : 'Queue';
+    const roonAction = ACTION_MAP[action] || action;
+    const msKey     = `pl-${Date.now()}-${Math.random()}`;
 
-      // Step 1: Search
+    await new Promise(resolve => {
       _browse.browse({ hierarchy: 'search', input: query, multi_session_key: msKey }, (err) => {
         if (err) { results.push({ query, status: 'error', reason: String(err) }); return resolve(); }
 
-        _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 100 }, (err, topR) => {
+        _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 100, offset: 0 }, (err, topR) => {
           if (err) { results.push({ query, status: 'error', reason: String(err) }); return resolve(); }
 
-          // Step 2: Navigate into type category (Tracks / Albums / Artists)
-          const cat = (topR.items || []).find(i => i.title === type);
+          const cat = (topR.items || []).find(it => it.title === type);
           if (!cat) { results.push({ query, status: 'error', reason: `Category "${type}" not found` }); return resolve(); }
 
           _browse.browse({ hierarchy: 'search', item_key: cat.item_key, multi_session_key: msKey }, (err) => {
             if (err) { results.push({ query, status: 'error', reason: String(err) }); return resolve(); }
 
-            _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 50 }, (err, catR) => {
+            _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 50, offset: 0 }, (err, catR) => {
               if (err) { results.push({ query, status: 'error', reason: String(err) }); return resolve(); }
 
               const target = (catR.items || [])[0];
@@ -583,67 +563,42 @@ app.post('/api/playlist', async (req, res) => {
 
               const trackLabel = `${target.title} — ${target.subtitle}`;
 
-              // Step 3: Navigate into track to reveal its action list
-              _browse.browse({ hierarchy: 'search', item_key: target.item_key, multi_session_key: msKey }, (err, r) => {
+              _browse.browse({ hierarchy: 'search', item_key: target.item_key, zone_or_output_id: zone_id, multi_session_key: msKey }, (err, r) => {
                 if (err) { results.push({ query, track: trackLabel, status: 'error', reason: String(err) }); return resolve(); }
+                if (r.action !== 'list') { results.push({ query, track: trackLabel, status: 'queued', action: r.action }); return resolve(); }
 
-                if (r.action !== 'list') {
-                  results.push({ query, track: trackLabel, status: 'error', reason: 'Expected action list, got: ' + r.action });
-                  return resolve();
-                }
-
-                // Step 4: Find "Add to Playlist" in the action list
-                loadActionList(msKey, (err, addAction) => {
+                _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 10, offset: 0 }, (err, actionR) => {
                   if (err) { results.push({ query, track: trackLabel, status: 'error', reason: String(err) }); return resolve(); }
-                  if (!addAction) { results.push({ query, track: trackLabel, status: 'error', reason: '"Add to Playlist" action not found — is this a local library track?' }); return resolve(); }
 
-                  // Step 5: Navigate to playlist chooser
-                  _browse.browse({ hierarchy: 'search', item_key: addAction.item_key, multi_session_key: msKey }, (err) => {
-                    if (err) { results.push({ query, track: trackLabel, status: 'error', reason: String(err) }); return resolve(); }
+                  const directAction = (actionR.items || []).find(it => it.title === roonAction);
+                  const isIntermediate = !directAction && (actionR.items||[]).length > 0 && actionR.items[0].hint === 'action_list';
 
-                    _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 100 }, (err, plR) => {
+                  const execAction = (actionItem) => {
+                    _browse.browse({ hierarchy: 'search', item_key: actionItem.item_key, zone_or_output_id: zone_id, multi_session_key: msKey }, (err, playR) => {
                       if (err) { results.push({ query, track: trackLabel, status: 'error', reason: String(err) }); return resolve(); }
+                      results.push({ query, track: trackLabel, status: 'queued', action: roonAction, roon_action: playR.action });
+                      resolve();
+                    });
+                  };
 
-                      let playlist = (plR.items || []).find(i => i.title === name);
+                  if (directAction) return execAction(directAction);
 
-                      // Step 6a: Playlist exists — select it
-                      if (playlist) {
-                        playlistExists = true;
-                        _browse.browse({ hierarchy: 'search', item_key: playlist.item_key, multi_session_key: msKey }, (err, addR) => {
-                          if (err) { results.push({ query, track: trackLabel, status: 'error', reason: String(err) }); return resolve(); }
-                          results.push({ query, track: trackLabel, status: 'added', playlist: name, action: addR.action });
-                          resolve();
-                        });
-                        return;
-                      }
-
-                      // Step 6b: Playlist not found — optionally create it
-                      if (!create) {
-                        results.push({
-                          query, track: trackLabel, status: 'playlist_not_found',
-                          tip: 'Pass create:true to create the playlist automatically',
-                          available: (plR.items || []).filter(i => i.hint !== 'action').map(i => i.title)
-                        });
-                        return resolve();
-                      }
-
-                      // Look for "New Playlist" input option exposed by Roon
-                      const newOpt = (plR.items || []).find(i =>
-                        i.hint === 'action' || i.title.toLowerCase().includes('new')
-                      );
-                      if (!newOpt) {
-                        results.push({ query, track: trackLabel, status: 'error', reason: 'Playlist not found and Roon did not expose a "New Playlist" option' });
-                        return resolve();
-                      }
-
-                      _browse.browse({ hierarchy: 'search', item_key: newOpt.item_key, input: name, multi_session_key: msKey }, (err, createR) => {
+                  if (isIntermediate) {
+                    const mid = actionR.items[0];
+                    _browse.browse({ hierarchy: 'search', item_key: mid.item_key, multi_session_key: msKey }, (err) => {
+                      if (err) { results.push({ query, track: trackLabel, status: 'error', reason: String(err) }); return resolve(); }
+                      _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 15, offset: 0 }, (err, actionR2) => {
                         if (err) { results.push({ query, track: trackLabel, status: 'error', reason: String(err) }); return resolve(); }
-                        playlistExists = true;
-                        results.push({ query, track: trackLabel, status: 'created_and_added', playlist: name, action: createR.action });
-                        resolve();
+                        const pa2 = (actionR2.items || []).find(it => it.title === roonAction);
+                        if (!pa2) { results.push({ query, track: trackLabel, status: 'error', reason: `Action "${roonAction}" not found`, available: actionR2.items.map(it=>it.title) }); return resolve(); }
+                        execAction(pa2);
                       });
                     });
-                  });
+                    return;
+                  }
+
+                  results.push({ query, track: trackLabel, status: 'error', reason: `Action "${roonAction}" not found`, available: (actionR.items||[]).map(it=>it.title) });
+                  resolve();
                 });
               });
             });
@@ -652,14 +607,15 @@ app.post('/api/playlist', async (req, res) => {
       });
     });
 
-    // Brief pause between tracks — avoids hammering Roon's browse sessions
-    await new Promise(r => setTimeout(r, 500));
+    if (i < tracks.length - 1) await new Promise(r => setTimeout(r, 2000));
   }
 
+  const queued = results.filter(r => r.status === 'queued').length;
   res.json({
-    playlist: name,
-    added:   results.filter(r => r.status === 'added' || r.status === 'created_and_added').length,
-    total:   tracks.length,
+    name,
+    note: 'Tracks queued successfully. To save as a Roon playlist: Queue → ⋮ → Save Queue as Playlist.',
+    queued,
+    total: tracks.length,
     results
   });
 });
