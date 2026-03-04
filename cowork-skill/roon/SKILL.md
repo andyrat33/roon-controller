@@ -69,6 +69,7 @@ do shell script "curl -s 'http://YOUR_NAS_IP:3001/api/zones'"
 | POST | `/api/transport` | Playback control (play/pause/skip etc.) |
 | POST | `/api/volume` | Volume control |
 | GET | `/api/queue/<zone_id>` | View current queue |
+| POST | `/api/playlist` | Queue multiple tracks in order (save as playlist in Roon app) |
 | GET | `/api/inspect?q=<query>` | Debug: show Roon's exact action names for a track |
 
 ---
@@ -114,8 +115,44 @@ Range 0–100. `how`: `absolute`, `relative`, `relative_step`
 
 ## Playlist pattern
 
+### Option A — /api/playlist (recommended for multi-track lists)
+
+Queues all tracks in one API call. First track plays immediately, rest are queued.
+To save as a permanent Roon playlist: **Queue → ⋮ → Save Queue as Playlist**.
+
+> **Note:** Roon's Extension API does not expose "Add to Playlist" to third-party
+> extensions — only playback actions are available. The queue-then-save workflow
+> is the supported path.
+
+```json
+POST /api/playlist
+{
+  "name": "My 1988 Mix",
+  "zone_id": "YOUR_ZONE_ID",
+  "tracks": [
+    { "query": "Song One Artist One" },
+    { "query": "Song Two Artist Two" },
+    { "query": "Song Three Artist Three" }
+  ]
+}
+```
+
+Use AppleScript to call it — write the payload to a shell script to handle
+any apostrophes in track titles:
+
+```applescript
+do shell script "cat > /tmp/roon_pl.sh << 'EOF'
+#!/bin/bash
+printf '{\"name\":\"My Playlist\",\"zone_id\":\"YOUR_ZONE_ID\",\"tracks\":[{\"query\":\"Song One Artist\"},{\"query\":\"Song Two Artist\"}]}' > /tmp/rp.json
+curl -s -X POST http://YOUR_NAS_IP:3001/api/playlist -H 'Content-Type: application/json' -d @/tmp/rp.json
+EOF
+bash /tmp/roon_pl.sh"
+```
+
+### Option B — individual find-and-play calls (for short lists or fine control)
+
 First track → `Play Now` (starts playback, clears existing queue).
-All subsequent tracks → `Queue`. Use `delay 2` between calls to avoid race conditions.
+All subsequent tracks → `Queue`. Use `delay 2` between calls.
 
 ```applescript
 set zone to "YOUR_ZONE_ID"
