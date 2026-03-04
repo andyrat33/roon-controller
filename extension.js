@@ -512,6 +512,158 @@ app.get('/api/queue/:zone_id', (req, res) => {
   });
 });
 
+// ─── Playlist ─────────────────────────────────────────────────
+// POST /api/playlist
+// { name: "My Playlist", tracks: [{query, type?}], create?: false }
+//
+// Adds each track to the named Roon playlist via the browse API.
+// If create:true, attempts to create the playlist if it doesn't exist yet
+// (Roon exposes a "New Playlist" input in the Add to Playlist screen).
+//
+// Tracks are processed sequentially — Roon's browse API is session-stateful
+// and parallel playlist writes cause race conditions.
+app.post('/api/playlist', async (req, res) => {
+  if (!requireCore(res)) return;
+  const { name, tracks, create = false } = req.body;
+  if (!name)                                    return res.status(400).json({ error: 'name is required' });
+  if (!Array.isArray(tracks) || !tracks.length) return res.status(400).json({ error: 'tracks[] is required' });
+
+  const results        = [];
+  let   playlistExists = false; // set true once we've confirmed or created the playlist
+
+  // Helper: load action list for current browse position, handling the
+  // optional intermediate container Roon sometimes inserts (track title level).
+  function loadActionList(msKey, cb) {
+    _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 20 }, (err, actionR) => {
+      if (err) return cb(err);
+
+      const direct = (actionR.items || []).find(i => i.title === 'Add to Playlist');
+      if (direct) return cb(null, direct);
+
+      // Possible intermediate container (hint === 'action_list')
+      const mid = (actionR.items || []).find(i => i.hint === 'action_list');
+      if (!mid) return cb(null, null);
+
+      _browse.browse({ hierarchy: 'search', item_key: mid.item_key, multi_session_key: msKey }, (err) => {
+        if (err) return cb(err);
+        _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 20 }, (err, r2) => {
+          if (err) return cb(err);
+          cb(null, (r2.items || []).find(i => i.title === 'Add to Playlist') || null);
+        });
+      });
+    });
+  }
+
+  for (const track of tracks) {
+    const { query, type = 'Tracks' } = track;
+    if (!query) { results.push({ query, status: 'skipped', reason: 'missing query' }); continue; }
+
+    await new Promise(resolve => {
+      const msKey = `pl-${Date.now()}-${Math.random()}`;
+
+      // Step 1: Search
+      _browse.browse({ hierarchy: 'search', input: query, multi_session_key: msKey }, (err) => {
+        if (err) { results.push({ query, status: 'error', reason: String(err) }); return resolve(); }
+
+        _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 100 }, (err, topR) => {
+          if (err) { results.push({ query, status: 'error', reason: String(err) }); return resolve(); }
+
+          // Step 2: Navigate into type category (Tracks / Albums / Artists)
+          const cat = (topR.items || []).find(i => i.title === type);
+          if (!cat) { results.push({ query, status: 'error', reason: `Category "${type}" not found` }); return resolve(); }
+
+          _browse.browse({ hierarchy: 'search', item_key: cat.item_key, multi_session_key: msKey }, (err) => {
+            if (err) { results.push({ query, status: 'error', reason: String(err) }); return resolve(); }
+
+            _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 50 }, (err, catR) => {
+              if (err) { results.push({ query, status: 'error', reason: String(err) }); return resolve(); }
+
+              const target = (catR.items || [])[0];
+              if (!target) { results.push({ query, status: 'not_found' }); return resolve(); }
+
+              const trackLabel = `${target.title} — ${target.subtitle}`;
+
+              // Step 3: Navigate into track to reveal its action list
+              _browse.browse({ hierarchy: 'search', item_key: target.item_key, multi_session_key: msKey }, (err, r) => {
+                if (err) { results.push({ query, track: trackLabel, status: 'error', reason: String(err) }); return resolve(); }
+
+                if (r.action !== 'list') {
+                  results.push({ query, track: trackLabel, status: 'error', reason: 'Expected action list, got: ' + r.action });
+                  return resolve();
+                }
+
+                // Step 4: Find "Add to Playlist" in the action list
+                loadActionList(msKey, (err, addAction) => {
+                  if (err) { results.push({ query, track: trackLabel, status: 'error', reason: String(err) }); return resolve(); }
+                  if (!addAction) { results.push({ query, track: trackLabel, status: 'error', reason: '"Add to Playlist" action not found — is this a local library track?' }); return resolve(); }
+
+                  // Step 5: Navigate to playlist chooser
+                  _browse.browse({ hierarchy: 'search', item_key: addAction.item_key, multi_session_key: msKey }, (err) => {
+                    if (err) { results.push({ query, track: trackLabel, status: 'error', reason: String(err) }); return resolve(); }
+
+                    _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 100 }, (err, plR) => {
+                      if (err) { results.push({ query, track: trackLabel, status: 'error', reason: String(err) }); return resolve(); }
+
+                      let playlist = (plR.items || []).find(i => i.title === name);
+
+                      // Step 6a: Playlist exists — select it
+                      if (playlist) {
+                        playlistExists = true;
+                        _browse.browse({ hierarchy: 'search', item_key: playlist.item_key, multi_session_key: msKey }, (err, addR) => {
+                          if (err) { results.push({ query, track: trackLabel, status: 'error', reason: String(err) }); return resolve(); }
+                          results.push({ query, track: trackLabel, status: 'added', playlist: name, action: addR.action });
+                          resolve();
+                        });
+                        return;
+                      }
+
+                      // Step 6b: Playlist not found — optionally create it
+                      if (!create) {
+                        results.push({
+                          query, track: trackLabel, status: 'playlist_not_found',
+                          tip: 'Pass create:true to create the playlist automatically',
+                          available: (plR.items || []).filter(i => i.hint !== 'action').map(i => i.title)
+                        });
+                        return resolve();
+                      }
+
+                      // Look for "New Playlist" input option exposed by Roon
+                      const newOpt = (plR.items || []).find(i =>
+                        i.hint === 'action' || i.title.toLowerCase().includes('new')
+                      );
+                      if (!newOpt) {
+                        results.push({ query, track: trackLabel, status: 'error', reason: 'Playlist not found and Roon did not expose a "New Playlist" option' });
+                        return resolve();
+                      }
+
+                      _browse.browse({ hierarchy: 'search', item_key: newOpt.item_key, input: name, multi_session_key: msKey }, (err, createR) => {
+                        if (err) { results.push({ query, track: trackLabel, status: 'error', reason: String(err) }); return resolve(); }
+                        playlistExists = true;
+                        results.push({ query, track: trackLabel, status: 'created_and_added', playlist: name, action: createR.action });
+                        resolve();
+                      });
+                    });
+                  });
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+
+    // Brief pause between tracks — avoids hammering Roon's browse sessions
+    await new Promise(r => setTimeout(r, 500));
+  }
+
+  res.json({
+    playlist: name,
+    added:   results.filter(r => r.status === 'added' || r.status === 'created_and_added').length,
+    total:   tracks.length,
+    results
+  });
+});
+
 // ─── Start ────────────────────────────────────────────────────
 app.listen(PORT, '0.0.0.0', () => {
   console.log('');
@@ -527,6 +679,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`   POST /api/transport  { zone_id, action }`);
   console.log(`   POST /api/volume     { zone_id, how, value }`);
   console.log(`   GET  /api/queue/:zone_id`);
+  console.log(`   POST /api/playlist   { name, tracks:[{query,type?}], create? }`);
   console.log('');
   console.log('🔍 Searching for Roon Core on the network...');
   console.log('   → Open Roon → Settings → Extensions → Enable "Cowork Controller"');
