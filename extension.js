@@ -471,6 +471,19 @@ app.post('/api/transport', (req, res) => {
   });
 });
 
+
+// ─── Shuffle ──────────────────────────────────────────────────
+// POST /api/shuffle  { zone_id, shuffle: true|false }
+app.post('/api/shuffle', (req, res) => {
+  if (!requireCore(res)) return;
+  const { zone_id, shuffle } = req.body;
+  if (shuffle === undefined) return res.status(400).json({ error: 'shuffle (boolean) is required' });
+  _transport.change_settings(zone_id, { shuffle: !!shuffle }, (err) => {
+    if (err) return res.status(500).json({ error: String(err) });
+    res.json({ success: true, shuffle: !!shuffle });
+  });
+});
+
 // ─── Volume ───────────────────────────────────────────────────
 // POST /api/volume  { zone_id, how: "absolute"|"relative"|"relative_step", value: number }
 app.post('/api/volume', (req, res) => {

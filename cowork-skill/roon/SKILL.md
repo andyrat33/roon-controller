@@ -71,6 +71,7 @@ do shell script "curl -s 'http://YOUR_NAS_IP:3001/api/zones'"
 | GET | `/api/queue/<zone_id>` | View current queue |
 | POST | `/api/playlist` | Queue multiple tracks in order (save as playlist in Roon app) |
 | GET | `/api/inspect?q=<query>` | Debug: show Roon's exact action names for a track |
+| POST | `/api/shuffle` | Enable or disable shuffle for a zone |
 
 ---
 
@@ -102,6 +103,27 @@ These are the real strings Roon uses internally. Wrong names silently fall back 
 Valid actions: `play`, `pause`, `stop`, `next`, `previous`, `toggle_play_pause`
 
 ---
+
+
+---
+
+## shuffle
+
+```json
+{ "zone_id": "...", "shuffle": true }
+```
+
+Set `shuffle` to `true` to enable, `false` to disable.
+
+```applescript
+do shell script "python3 /dev/stdin <<'PYEOF'
+import json, subprocess
+payload = {'zone_id': '160170f12687683c6501b7831b991e9a2a49', 'shuffle': True}
+with open('/tmp/rp.json', 'w') as f: json.dump(payload, f)
+r = subprocess.run(['curl','-s','-X','POST','http://172.31.254.142:3001/api/shuffle','-H','Content-Type: application/json','-d','@/tmp/rp.json'], capture_output=True, text=True)
+print(r.stdout)
+PYEOF"
+```
 
 ## volume
 
