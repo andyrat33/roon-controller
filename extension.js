@@ -633,6 +633,108 @@ app.post('/api/playlist', async (req, res) => {
   });
 });
 
+// ─── Play Album ──────────────────────────────────────────────
+// POST /api/play-album  { zone_id, query, action?: "Play Now"|"Queue"|"Add Next"|"Start Radio" }
+// Searches for an album, navigates the full Roon browse hierarchy,
+// and triggers the album-level action (which queues all tracks natively).
+app.post('/api/play-album', (req, res) => {
+  if (!requireCore(res)) return;
+  const { zone_id, query, action = 'Play Now' } = req.body;
+  if (!zone_id || !query) return res.status(400).json({ error: 'zone_id and query are required' });
+
+  const ACTION_MAP = { 'Add to Queue': 'Queue', 'Play Next': 'Add Next', 'Add to queue': 'Queue' };
+  const roonAction = ACTION_MAP[action] || action;
+  const msKey = `album-${Date.now()}-${Math.random()}`;
+  const log = [];
+
+  // Helper: browse then load within the same session
+  function navAndLoad(browseOpts, loadCount, cb) {
+    _browse.browse({ ...browseOpts, hierarchy: 'search', multi_session_key: msKey }, (err, bR) => {
+      if (err) return cb(err);
+      _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: loadCount, offset: 0 }, (err, lR) => {
+        if (err) return cb(err);
+        cb(null, bR, lR);
+      });
+    });
+  }
+
+  // Step 1: Search
+  navAndLoad({ input: query }, 100, (err, _, topR) => {
+    if (err) return res.status(500).json({ error: String(err) });
+
+    const topItems = topR.items || [];
+    log.push({ step: 'search', categories: topItems.map(i => i.title) });
+
+    // Step 2: Find Albums category
+    const albumsCat = topItems.find(i => i.title === 'Albums');
+    if (!albumsCat) return res.status(404).json({ error: 'No "Albums" category in results', log });
+
+    navAndLoad({ item_key: albumsCat.item_key }, 50, (err, _, albumsR) => {
+      if (err) return res.status(500).json({ error: String(err) });
+
+      const albums = albumsR.items || [];
+      log.push({ step: 'albums list', items: albums.map(i => ({ title: i.title, subtitle: i.subtitle, hint: i.hint })) });
+      if (albums.length === 0) return res.status(404).json({ error: 'No albums found', log });
+
+      const target = albums[0];
+
+      // Step 3: Browse into the album — this starts a deeper navigation
+      // We recursively navigate until we find action items (Play Now, Queue, etc.)
+      function findAndExecuteAction(itemKey, depth) {
+        if (depth > 5) return res.status(500).json({ error: 'Too many navigation levels', log });
+
+        _browse.browse({ hierarchy: 'search', item_key: itemKey, zone_or_output_id: zone_id, multi_session_key: msKey }, (err, bR) => {
+          if (err) return res.status(500).json({ error: String(err), log });
+
+          log.push({ step: `browse depth ${depth}`, action: bR.action });
+
+          // If the browse itself triggered playback, we're done
+          if (bR.action && bR.action !== 'list') {
+            return res.json({ success: true, album: target.title, artist: target.subtitle, action: bR.action, log });
+          }
+
+          _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 50, offset: 0 }, (err, loadR) => {
+            if (err) return res.status(500).json({ error: String(err), log });
+
+            const items = loadR.items || [];
+            log.push({ step: `items depth ${depth}`, items: items.map(i => ({ title: i.title, hint: i.hint })) });
+
+            // Look for the requested action (e.g. "Play Now") among the items
+            const actionItem = items.find(i => i.hint === 'action' && i.title === roonAction);
+            if (actionItem) {
+              // Found the action — execute it
+              _browse.browse({ hierarchy: 'search', item_key: actionItem.item_key, zone_or_output_id: zone_id, multi_session_key: msKey }, (err, playR) => {
+                if (err) return res.status(500).json({ error: String(err), log });
+                return res.json({ success: true, album: target.title, artist: target.subtitle, action: playR.action, log });
+              });
+              return;
+            }
+
+            // Look for any action items at this level
+            const anyAction = items.find(i => i.hint === 'action');
+            if (anyAction) {
+              // There are actions but not the one we want
+              return res.status(404).json({
+                error: `Action "${roonAction}" not found at album level`,
+                available: items.filter(i => i.hint === 'action').map(i => i.title),
+                log
+              });
+            }
+
+            // No actions found yet — navigate into the first non-header item to go deeper
+            const nextItem = items.find(i => i.hint !== 'header');
+            if (!nextItem) return res.status(404).json({ error: 'No navigable items found', log });
+
+            findAndExecuteAction(nextItem.item_key, depth + 1);
+          });
+        });
+      }
+
+      findAndExecuteAction(target.item_key, 0);
+    });
+  });
+});
+
 // ─── Start ────────────────────────────────────────────────────
 app.listen(PORT, '0.0.0.0', () => {
   console.log('');
@@ -649,6 +751,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`   POST /api/volume     { zone_id, how, value }`);
   console.log(`   GET  /api/queue/:zone_id`);
   console.log(`   POST /api/playlist   { name, tracks:[{query,type?}], create? }`);
+  console.log(`   POST /api/play-album { zone_id, query, action? }`);
   console.log('');
   console.log('🔍 Searching for Roon Core on the network...');
   console.log('   → Open Roon → Settings → Extensions → Enable "Cowork Controller"');

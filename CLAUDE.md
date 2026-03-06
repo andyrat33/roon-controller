@@ -64,6 +64,7 @@ ssh admin@172.31.254.142 "docker restart roon-controller"
 | POST | `/api/seek` | Seek within current track |
 | GET | `/api/queue/:zone_id` | View current queue |
 | POST | `/api/playlist` | Queue multiple tracks in order |
+| POST | `/api/play-album` | Search and play an entire album natively |
 
 ---
 
@@ -111,6 +112,14 @@ Valid actions: `play`, `pause`, `stop`, `next`, `previous`, `toggle_play_pause`
 ```
 First track uses `Play Now`, subsequent tracks use `Queue` with a 2-second delay between calls. To save as a permanent Roon playlist: **Queue → ⋮ → Save Queue as Playlist**.
 
+### play-album
+```json
+{ "zone_id": "...", "query": "Artist Album", "action": "Play Now" }
+```
+Searches for an album, navigates the full Roon browse hierarchy (Search → Albums → Album page → Play Album → action), and triggers the album-level action. This queues **all tracks** natively in the correct album order — unlike `find-and-play` which only plays a single track, or `playlist` which searches tracks individually and may return wrong versions.
+
+Supports the same action strings as `find-and-play`: `Play Now`, `Queue`, `Add Next`, `Start Radio`.
+
 ---
 
 ## Cowork Skill
@@ -144,6 +153,14 @@ PYEOF"
 ---
 
 ## Change History
+
+### Play-album endpoint (2026-03-06)
+- Added `POST /api/play-album` to `extension.js` — plays an entire album natively via Roon's browse hierarchy
+- Roon's album browse requires traversing multiple levels: Search → Albums → Album container → Album page (with "Play Album" action_list) → Actions (Play Now, Queue, etc.)
+- The endpoint recursively navigates up to 5 levels deep until it finds action items with `hint: "action"`
+- Unlike `find-and-play` (which only plays the first track of an album) or `playlist` (which searches tracks individually and may match wrong versions), this uses Roon's native album-level playback
+- Updated CLAUDE.md and cowork-skill/roon/SKILL.md to document the endpoint
+- No Docker rebuild required — `extension.js` is volume-mounted; restart only
 
 ### Shuffle endpoint (2026-03-05)
 - Added `POST /api/shuffle` to `extension.js` using `_transport.change_settings(zone_id, { shuffle: bool }, cb)`

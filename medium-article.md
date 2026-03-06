@@ -165,16 +165,38 @@ The status endpoint gives you a live view of every zone:
 | GET | `/api/zones` | List all playback zones with IDs |
 | GET | `/api/search?q=<query>[&type=Tracks\|Albums\|Artists]` | Search library + TIDAL |
 | GET | `/api/browse[?item_key=<key>]` | Navigate the library hierarchy |
-| POST | `/api/find-and-play` | **Main play endpoint** — search + play in one call |
+| POST | `/api/find-and-play` | Search + play a single track |
+| POST | `/api/play-album` | **Play an entire album** — natively queues all tracks in order |
 | POST | `/api/playlist` | Queue multiple tracks in order |
 | POST | `/api/transport` | Control playback `{ zone_id, action }` |
 | POST | `/api/volume` | Set volume `{ zone_id, how, value }` |
+| POST | `/api/shuffle` | Enable/disable shuffle `{ zone_id, shuffle }` |
 | GET | `/api/queue/:zone_id` | View the current queue |
 | GET | `/api/inspect?q=<query>` | Debug: show Roon's exact action names for a track |
 
-### The find-and-play endpoint
+### Playing albums with /api/play-album
 
-This is the workhorse of the whole system. Give it a natural language query, a zone, and an action — it handles the full Roon browse session internally:
+If you want to play a complete album, use the dedicated `play-album` endpoint. It navigates Roon's full browse hierarchy — Search → Albums → Album page → Play Album → action — and triggers album-level playback, which natively queues every track in the correct order:
+
+```bash
+curl -X POST http://YOUR_NAS_IP:3001/api/play-album \
+  -H "Content-Type: application/json" \
+  -d '{
+    "zone_id": "YOUR_ZONE_ID",
+    "query": "Arctic Monkeys AM",
+    "action": "Play Now"
+  }'
+```
+
+```json
+{ "success": true, "album": "AM", "artist": "Arctic Monkeys", "action": "list" }
+```
+
+This is important because Roon's album browse hierarchy is deeper than you'd expect. An album search result requires multiple levels of navigation before you reach the actual playback actions. The `find-and-play` endpoint only plays the first track of an album, and the `playlist` endpoint searches tracks individually (which can return versions from different albums or compilations). The `play-album` endpoint solves both problems by using Roon's own album-level "Play Now".
+
+### Playing single tracks with /api/find-and-play
+
+This is the workhorse for single track playback. Give it a natural language query, a zone, and an action — it handles the full Roon browse session internally:
 
 ```bash
 curl -X POST http://YOUR_NAS_IP:3001/api/find-and-play \

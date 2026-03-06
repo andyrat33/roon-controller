@@ -72,10 +72,30 @@ do shell script "curl -s 'http://YOUR_NAS_IP:3001/api/zones'"
 | POST | `/api/playlist` | Queue multiple tracks in order (save as playlist in Roon app) |
 | GET | `/api/inspect?q=<query>` | Debug: show Roon's exact action names for a track |
 | POST | `/api/shuffle` | Enable or disable shuffle for a zone |
+| POST | `/api/play-album` | **Play an entire album** — natively queues all tracks in order |
 
 ---
 
-## find-and-play (main endpoint)
+## play-album (album playback)
+
+**Use this endpoint when the user asks to play an album.** Do NOT use `find-and-play` for albums — it only plays the first track.
+
+```json
+{ "zone_id": "...", "query": "Artist Album", "action": "Play Now" }
+```
+
+Searches for the album, navigates Roon's full browse hierarchy (Search → Albums → Album page → Play Album → action), and triggers album-level playback. All tracks are queued natively in the correct album order.
+
+Supports the same action strings: `Play Now`, `Queue`, `Add Next`, `Start Radio`.
+
+```applescript
+set payload to "{\"zone_id\":\"YOUR_ZONE_ID\",\"query\":\"Arctic Monkeys AM\",\"action\":\"Play Now\"}"
+do shell script "echo " & quoted form of payload & " > /tmp/rp.json && curl -s -X POST http://YOUR_NAS_IP:3001/api/play-album -H 'Content-Type: application/json' -d @/tmp/rp.json"
+```
+
+---
+
+## find-and-play (single track playback)
 
 ```json
 { "zone_id": "...", "query": "...", "type": "Tracks", "action": "Play Now" }

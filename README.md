@@ -73,16 +73,25 @@ curl http://YOUR_NAS_IP:3001/api/status | python3 -m json.tool
 | GET | `/api/zones` | List all playback zones |
 | GET | `/api/search?q=<query>[&type=tracks\|albums\|artists]` | Search library |
 | GET | `/api/browse[?item_key=<key>]` | Browse library hierarchy |
-| POST | `/api/play` | Play an item `{ zone_id, item_key, action? }` |
+| POST | `/api/find-and-play` | Search + play a single track `{ zone_id, query, action? }` |
+| POST | `/api/play-album` | Play an entire album natively `{ zone_id, query, action? }` |
+| POST | `/api/playlist` | Queue multiple tracks in order `{ name, zone_id, tracks[] }` |
+| POST | `/api/play` | Play an item by key `{ zone_id, item_key, action? }` |
 | POST | `/api/transport` | Playback control `{ zone_id, action }` |
 | POST | `/api/volume` | Set volume `{ zone_id, how, value }` |
+| POST | `/api/shuffle` | Enable/disable shuffle `{ zone_id, shuffle }` |
 | GET | `/api/queue/:zone_id` | View queue |
+| GET | `/api/inspect?q=<query>` | Debug: show Roon's exact action names |
 
 ### Transport actions
 `play` · `pause` · `stop` · `next` · `previous` · `toggle_play_pause`
 
 ### Play actions
-`Play Now` (default) · `Play Next` · `Add to Queue` · `Start Radio`
+`Play Now` (default) · `Queue` · `Add Next` · `Start Radio`
+
+### Album vs track playback
+
+Use `/api/play-album` for albums — it navigates Roon's full browse hierarchy and queues all tracks natively in the correct order. The `/api/find-and-play` endpoint is for single tracks only. The `/api/playlist` endpoint queues tracks by individual search queries, useful for custom playlists but not for playing a specific album (tracks may match wrong versions).
 
 ---
 
