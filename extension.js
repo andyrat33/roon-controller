@@ -456,6 +456,44 @@ app.post('/api/play', (req, res) => {
   });
 });
 
+// ─── Profile list ─────────────────────────────────────────────
+// GET /api/profiles
+// Returns the list of Roon profiles and which one is currently active.
+// NOTE: The Roon Extension API does not support switching profiles — profiles
+// are per-Roon-Remote (app) and cannot be changed by a third-party extension.
+app.get('/api/profiles', (req, res) => {
+  if (!requireCore(res)) return;
+  const msKey = `profiles-${Date.now()}-${Math.random()}`;
+
+  function nav(browseOpts, cb) {
+    _browse.browse({ ...browseOpts, hierarchy: 'browse', multi_session_key: msKey }, (err, bR) => {
+      if (err) return cb(err);
+      _browse.load({ hierarchy: 'browse', multi_session_key: msKey, count: 50, offset: 0 }, (err, lR) => {
+        if (err) return cb(err);
+        cb(null, lR.items || []);
+      });
+    });
+  }
+
+  nav({}, (err, rootItems) => {
+    if (err) return res.status(500).json({ error: String(err) });
+    const settings = rootItems.find(i => i.title === 'Settings');
+    if (!settings) return res.status(404).json({ error: 'Settings menu not found' });
+
+    nav({ item_key: settings.item_key }, (err, settingsItems) => {
+      if (err) return res.status(500).json({ error: String(err) });
+      const profileMenu = settingsItems.find(i => /profile/i.test(i.title));
+      if (!profileMenu) return res.status(404).json({ error: 'Profile menu not found in Settings' });
+
+      nav({ item_key: profileMenu.item_key }, (err, profileItems) => {
+        if (err) return res.status(500).json({ error: String(err) });
+        const profiles = profileItems.map(i => ({ name: i.title, active: i.subtitle === 'selected' }));
+        res.json({ profiles });
+      });
+    });
+  });
+});
+
 // ─── Transport ────────────────────────────────────────────────
 // POST /api/transport  { zone_id, action: play|pause|stop|next|previous|toggle_play_pause }
 app.post('/api/transport', (req, res) => {
@@ -752,6 +790,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`   GET  /api/queue/:zone_id`);
   console.log(`   POST /api/playlist   { name, tracks:[{query,type?}], create? }`);
   console.log(`   POST /api/play-album { zone_id, query, action? }`);
+  console.log(`   GET  /api/profiles  (read-only — profile switching not supported by Extension API)`);
   console.log('');
   console.log('🔍 Searching for Roon Core on the network...');
   console.log('   → Open Roon → Settings → Extensions → Enable "Cowork Controller"');

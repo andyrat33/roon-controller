@@ -65,6 +65,7 @@ ssh admin@172.31.254.142 "docker restart roon-controller"
 | GET | `/api/queue/:zone_id` | View current queue |
 | POST | `/api/playlist` | Queue multiple tracks in order |
 | POST | `/api/play-album` | Search and play an entire album natively |
+| GET | `/api/profiles` | List profiles and which is active (read-only) |
 
 ---
 
@@ -147,12 +148,20 @@ PYEOF"
 ## Roon Extension API Notes
 
 - The Roon Extension API does **not** expose playlist management (create/add to playlist) to third-party extensions. Only playback actions are available. The queue-then-save workflow is the supported path.
+- The Roon Extension API does **not** support profile switching. Profiles are tied to Roon Remotes (apps on phones/tablets), and the Extension API runs as a separate client — it cannot change the active profile for any Roon Remote. The `/api/profiles` endpoint can read the profile list but not switch. Profiles in this setup: James, House, Anne, Andrew, Claude.
 - Roon's internal action strings are case-sensitive. Use exactly: `Play Now`, `Queue`, `Add Next`, `Start Radio`.
 - Browse sessions use `multi_session_key` to keep `item_key` values valid across multiple browse/load calls within the same search context.
 
 ---
 
 ## Change History
+
+### Profiles investigation (2026-03-06)
+- Investigated whether Roon user profiles can be switched via the Extension API
+- Added `GET /api/profiles` to list available profiles and show which is active
+- Confirmed via browse hierarchy exploration (Root → Settings → Profile) that profile list is accessible, profiles are: James, House, Anne, Andrew, Claude
+- Profile **switching** is not possible — the Extension API runs as a separate client from Roon Remotes, and profile selection is per-Remote only; browse-based switching only affects the extension's own session context, not the global Roon state
+- Documented limitation in Roon Extension API Notes
 
 ### Play-album endpoint (2026-03-06)
 - Added `POST /api/play-album` to `extension.js` — plays an entire album natively via Roon's browse hierarchy
