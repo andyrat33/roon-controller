@@ -7,6 +7,10 @@ Usage (from terminal):
   python3 roon_control.py zones
   python3 roon_control.py search "Miles Davis" [--type tracks|albums|artists]
   python3 roon_control.py play <zone_id> <item_key> [--action "Play Now|Play Next|Add to Queue"]
+  python3 roon_control.py find-and-play <zone_id> <query> [--type Tracks] [--action "Play Now"]
+  python3 roon_control.py play-album <zone_id> <query> [--action "Play Now"]
+  python3 roon_control.py shuffle <zone_id> <true|false>
+  python3 roon_control.py playlist <zone_id> <track1> <track2> ...
   python3 roon_control.py transport <zone_id> <action>
   python3 roon_control.py volume <zone_id> <value> [--how absolute|relative]
   python3 roon_control.py queue <zone_id>
@@ -122,6 +126,39 @@ def cmd_browse(args):
     print(json.dumps(result, indent=2))
 
 
+def cmd_find_and_play(args):
+    payload = {'zone_id': args.zone_id, 'query': args.query, 'action': args.action}
+    if args.type:
+        payload['type'] = args.type
+    result = _post('/find-and-play', payload)
+    print(json.dumps(result, indent=2))
+
+
+def cmd_play_album(args):
+    payload = {'zone_id': args.zone_id, 'query': args.query, 'action': args.action}
+    result = _post('/play-album', payload)
+    print(json.dumps(result, indent=2))
+
+
+def cmd_shuffle(args):
+    val = args.value.lower()
+    if val not in ('true', 'false'):
+        print("Error: value must be 'true' or 'false'", file=sys.stderr)
+        sys.exit(1)
+    payload = {'zone_id': args.zone_id, 'shuffle': val == 'true'}
+    result = _post('/shuffle', payload)
+    print(json.dumps(result, indent=2))
+
+
+def cmd_playlist(args):
+    payload = {
+        'zone_id': args.zone_id,
+        'tracks': [{'query': t} for t in args.tracks],
+    }
+    result = _post('/playlist', payload)
+    print(json.dumps(result, indent=2))
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 p = argparse.ArgumentParser(description='Cowork Roon Controller')
 sub = p.add_subparsers(dest='cmd', required=True)
@@ -153,15 +190,38 @@ q.add_argument('zone_id')
 br = sub.add_parser('browse')
 br.add_argument('--item_key', default=None)
 
+fap = sub.add_parser('find-and-play')
+fap.add_argument('zone_id')
+fap.add_argument('query')
+fap.add_argument('--type', choices=['Tracks', 'Albums', 'Artists'])
+fap.add_argument('--action', default='Play Now')
+
+pa = sub.add_parser('play-album')
+pa.add_argument('zone_id')
+pa.add_argument('query')
+pa.add_argument('--action', default='Play Now')
+
+sh = sub.add_parser('shuffle')
+sh.add_argument('zone_id')
+sh.add_argument('value', metavar='true|false')
+
+plist = sub.add_parser('playlist')
+plist.add_argument('zone_id')
+plist.add_argument('tracks', nargs='+', metavar='track')
+
 CMDS = {
-    'status':    cmd_status,
-    'zones':     cmd_zones,
-    'search':    cmd_search,
-    'play':      cmd_play,
-    'transport': cmd_transport,
-    'volume':    cmd_volume,
-    'queue':     cmd_queue,
-    'browse':    cmd_browse,
+    'status':        cmd_status,
+    'zones':         cmd_zones,
+    'search':        cmd_search,
+    'play':          cmd_play,
+    'find-and-play': cmd_find_and_play,
+    'play-album':    cmd_play_album,
+    'shuffle':       cmd_shuffle,
+    'playlist':      cmd_playlist,
+    'transport':     cmd_transport,
+    'volume':        cmd_volume,
+    'queue':         cmd_queue,
+    'browse':        cmd_browse,
 }
 
 args = p.parse_args()

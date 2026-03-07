@@ -26,9 +26,15 @@ http://YOUR_NAS_IP:3001/api
 
 ## CRITICAL: How to make API calls
 
-**Python cannot reach the NAS** from within Cowork (gives "No route to host").
-Always use `curl` via `osascript`. Write JSON payloads to `/tmp/rp.json` to avoid
-apostrophe quoting issues in track titles (e.g. "Don't Stand So Close To Me").
+The method depends on your operating system. Python inside Cowork's sandbox typically
+cannot reach the NAS directly ("No route to host"), so you need to escape to the host.
+
+---
+
+### macOS — osascript (recommended)
+
+Use `curl` via `osascript`. Write JSON payloads to `/tmp/rp.json` to avoid apostrophe
+quoting issues in track titles (e.g. "Don't Stand So Close To Me").
 
 **GET:**
 ```applescript
@@ -40,6 +46,76 @@ do shell script "curl -s 'http://YOUR_NAS_IP:3001/api/status'"
 set payload to "{\"zone_id\":\"YOUR_ZONE_ID\",\"query\":\"Kate Bush Running Up That Hill\",\"type\":\"Tracks\",\"action\":\"Play Now\"}"
 do shell script "echo " & quoted form of payload & " > /tmp/rp.json && curl -s -X POST http://YOUR_NAS_IP:3001/api/find-and-play -H 'Content-Type: application/json' -d @/tmp/rp.json"
 ```
+
+> All `osascript` / AppleScript code blocks in this file are **macOS only**.
+
+---
+
+### Windows — three options (try in order)
+
+#### Option 1: Direct Python (try first)
+
+Windows Cowork's sandbox may have different network access than macOS. Try a plain
+`urllib` call — if it works, use inline Python for all calls:
+
+```python
+import urllib.request, json
+with urllib.request.urlopen('http://YOUR_NAS_IP:3001/api/status', timeout=10) as r:
+    print(r.read().decode())
+```
+
+For POST requests:
+```python
+import urllib.request, json
+payload = json.dumps({"zone_id": "YOUR_ZONE_ID", "query": "Kate Bush Running Up That Hill", "type": "Tracks", "action": "Play Now"}).encode()
+req = urllib.request.Request("http://YOUR_NAS_IP:3001/api/find-and-play", data=payload, headers={"Content-Type": "application/json"})
+with urllib.request.urlopen(req, timeout=10) as r:
+    print(r.read().decode())
+```
+
+#### Option 2: PowerShell fallback
+
+If direct Python fails ("No route to host"), escape to the Windows host via PowerShell:
+
+```python
+import subprocess, json
+payload = json.dumps({"zone_id": "YOUR_ZONE_ID", "query": "Kate Bush Running Up That Hill", "type": "Tracks", "action": "Play Now"})
+r = subprocess.run(
+    ["powershell", "-Command",
+     f"Invoke-RestMethod -Uri http://YOUR_NAS_IP:3001/api/find-and-play "
+     f"-Method POST -ContentType 'application/json' -Body '{payload}'"],
+    capture_output=True, text=True
+)
+print(r.stdout)
+```
+
+For GET requests via PowerShell:
+```python
+import subprocess
+r = subprocess.run(
+    ["powershell", "-Command",
+     "Invoke-RestMethod -Uri http://YOUR_NAS_IP:3001/api/status"],
+    capture_output=True, text=True
+)
+print(r.stdout)
+```
+
+#### Option 3: roon_control.py via PowerShell
+
+If `roon_control.py` is on the Windows machine, invoke it through PowerShell:
+
+```python
+import subprocess
+r = subprocess.run(
+    ["powershell", "-Command", "python roon_control.py status"],
+    capture_output=True, text=True
+)
+print(r.stdout)
+```
+
+The script supports all key endpoints — see `roon_control.py --help` for the full list.
+
+---
 
 ---
 
