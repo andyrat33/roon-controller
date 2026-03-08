@@ -90,6 +90,16 @@ function zoneInfo(z) {
   };
 }
 
+function pickBestMatch(items, index, artist) {
+  if (!items || items.length === 0) return undefined;
+  if (artist) {
+    const needle = artist.toLowerCase();
+    const match = items.find(i => (i.subtitle || '').toLowerCase().includes(needle));
+    if (match) return match;
+  }
+  return items[Math.min(index, items.length - 1)];
+}
+
 // ─── REST API ─────────────────────────────────────────────────
 
 // GET /api/status  — health check + current playback across all zones
@@ -333,7 +343,7 @@ app.get('/api/inspect', (req, res) => {
 // Searches and plays in a single session so item_keys stay valid throughout.
 app.post('/api/find-and-play', (req, res) => {
   if (!requireCore(res)) return;
-  const { zone_id, query, type = 'Tracks', index = 0, action = 'Play Now' } = req.body;
+  const { zone_id, query, type = 'Tracks', index = 0, action = 'Play Now', artist } = req.body;
   if (!zone_id || !query) return res.status(400).json({ error: 'zone_id and query are required' });
 
   // Normalise action aliases to match Roon's actual labels
@@ -362,7 +372,7 @@ app.post('/api/find-and-play', (req, res) => {
           const items = catR.items || [];
           if (items.length === 0) return res.status(404).json({ error: `No results for "${query}" in ${type}` });
 
-          const target = items[Math.min(index, items.length - 1)];
+          const target = pickBestMatch(items, index, artist);
 
           // Step 3: Navigate to item to get action list
           _browse.browse({ hierarchy: 'search', item_key: target.item_key, zone_or_output_id: zone_id, multi_session_key: msKey }, (err, r) => {
@@ -586,7 +596,7 @@ app.post('/api/playlist', async (req, res) => {
   const ACTION_MAP   = { 'Add to Queue': 'Queue', 'Play Next': 'Add Next', 'Add to queue': 'Queue' };
 
   for (let i = 0; i < tracks.length; i++) {
-    const { query, type = 'Tracks' } = tracks[i];
+    const { query, type = 'Tracks', artist } = tracks[i];
     if (!query) { results.push({ query, status: 'skipped', reason: 'missing query' }); continue; }
 
     const action    = i === 0 ? 'Play Now' : 'Queue';
@@ -609,7 +619,8 @@ app.post('/api/playlist', async (req, res) => {
             _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 50, offset: 0 }, (err, catR) => {
               if (err) { results.push({ query, status: 'error', reason: String(err) }); return resolve(); }
 
-              const target = (catR.items || [])[0];
+              const catItems = catR.items || [];
+              const target = pickBestMatch(catItems, 0, artist);
               if (!target) { results.push({ query, status: 'not_found' }); return resolve(); }
 
               const trackLabel = `${target.title} — ${target.subtitle}`;

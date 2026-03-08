@@ -177,6 +177,26 @@ do shell script "echo " & quoted form of payload & " > /tmp/rp.json && curl -s -
 { "zone_id": "...", "query": "...", "type": "Tracks", "action": "Play Now" }
 ```
 
+### Avoiding cover versions — always pass `artist`
+
+When the user asks to play a track by a specific artist, **always include `"artist"`** in
+the request. The API matches this against Roon's subtitle field (which contains the artist
+name), filtering out cover versions and live recordings by other artists that Roon may rank
+higher in search results.
+
+```json
+{
+  "zone_id": "...",
+  "query": "The Sound of Silence Simon and Garfunkel",
+  "type": "Tracks",
+  "artist": "Simon & Garfunkel",
+  "action": "Play Now"
+}
+```
+
+If no subtitle match is found the API falls back to Roon's top result — so passing `artist`
+is always safe and never causes a failure.
+
 ### CRITICAL — Roon's exact action labels
 
 These are the real strings Roon uses internally. Wrong names silently fall back to Play Now.
@@ -248,12 +268,16 @@ POST /api/playlist
   "name": "My 1988 Mix",
   "zone_id": "YOUR_ZONE_ID",
   "tracks": [
-    { "query": "Song One Artist One" },
-    { "query": "Song Two Artist Two" },
-    { "query": "Song Three Artist Three" }
+    { "query": "The Sound of Silence Simon and Garfunkel", "artist": "Simon & Garfunkel" },
+    { "query": "Mrs Robinson Simon and Garfunkel",        "artist": "Simon & Garfunkel" },
+    { "query": "Hotel California Eagles",                 "artist": "Eagles" }
   ]
 }
 ```
+
+Include `"artist"` in each track entry to prevent cover versions from being selected.
+The value is matched case-insensitively against Roon's artist field. Omitting it falls
+back to Roon's top result.
 
 Use AppleScript to call it — write the payload to a shell script to handle
 any apostrophes in track titles:
