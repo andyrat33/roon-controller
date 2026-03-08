@@ -662,59 +662,29 @@ app.post('/api/seek', (req, res) => {
 
 // ─── Queue ────────────────────────────────────────────────────
 // GET /api/queue/:zone_id
+// Uses subscribe_queue (the only queue-reading method in RoonApiTransport).
+// The callback fires with response="Subscribed" and the initial queue in msg.items.
+// The `done` flag ignores subsequent change notifications after the first response.
 app.get('/api/queue/:zone_id', (req, res) => {
   if (!requireCore(res)) return;
-  _transport.get_queue(req.params.zone_id, 100, (err, queue) => {
-    if (err) return res.status(500).json({ error: String(err) });
-    res.json(queue || []);
+  let done = false;
+  _transport.subscribe_queue(req.params.zone_id, 100, (response, msg) => {
+    if (done) return;
+    done = true;
+    res.json(msg?.items || []);
   });
 });
 
 // POST /api/queue/clear  { zone_id }
-// Navigates the Roon browse hierarchy to find and execute the "Clear Queue" action.
+// Not supported: the Roon Extension API has no queue-clearing mechanism.
+// hierarchy:'browse' root does not include a Queue item.
+// hierarchy:'queue' returns InvalidHierarchy.
+// Workaround: use Play Now on any track/album to atomically replace the queue,
+// or clear it manually in the Roon app.
 app.post('/api/queue/clear', (req, res) => {
-  if (!requireCore(res)) return;
-  const { zone_id } = req.body;
-  if (!zone_id) return res.status(400).json({ error: 'zone_id is required' });
-
-  const msKey = `qclear-${Date.now()}-${Math.random()}`;
-  const log = [];
-
-  _browse.browse({ hierarchy: 'browse', zone_or_output_id: zone_id, multi_session_key: msKey }, (err) => {
-    if (err) return res.status(500).json({ error: String(err) });
-
-    _browse.load({ hierarchy: 'browse', multi_session_key: msKey, count: 100, offset: 0 }, (err, rootR) => {
-      if (err) return res.status(500).json({ error: String(err) });
-
-      const rootItems = rootR.items || [];
-      log.push({ step: 'root', items: rootItems.map(i => ({ title: i.title, hint: i.hint })) });
-
-      const queueItem = rootItems.find(i => /queue/i.test(i.title));
-      if (!queueItem) {
-        return res.status(404).json({ error: 'Queue not found in root browse', log });
-      }
-
-      _browse.browse({ hierarchy: 'browse', item_key: queueItem.item_key, zone_or_output_id: zone_id, multi_session_key: msKey }, (err) => {
-        if (err) return res.status(500).json({ error: String(err), log });
-
-        _browse.load({ hierarchy: 'browse', multi_session_key: msKey, count: 50, offset: 0 }, (err, qR) => {
-          if (err) return res.status(500).json({ error: String(err), log });
-
-          const qItems = qR.items || [];
-          log.push({ step: 'queue section', items: qItems.map(i => ({ title: i.title, hint: i.hint })) });
-
-          const clearItem = qItems.find(i => /clear/i.test(i.title));
-          if (!clearItem) {
-            return res.status(404).json({ error: 'Clear Queue action not found', log });
-          }
-
-          _browse.browse({ hierarchy: 'browse', item_key: clearItem.item_key, zone_or_output_id: zone_id, multi_session_key: msKey }, (err, clearR) => {
-            if (err) return res.status(500).json({ error: String(err), log });
-            res.json({ success: true, action: clearR.action });
-          });
-        });
-      });
-    });
+  res.status(501).json({
+    error:       'Queue clearing is not supported by the Roon Extension API',
+    workaround:  'Use Play Now on any track or album to replace the queue, or clear it in the Roon app.'
   });
 });
 
