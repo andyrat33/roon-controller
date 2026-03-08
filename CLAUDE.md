@@ -164,6 +164,11 @@ PYEOF"
 
 ## Change History
 
+### Fix GET /api/queue and remove non-functional queue/clear (2026-03-08)
+- Fixed `GET /api/queue/:zone_id` — was calling `_transport.get_queue()` which does not exist in `RoonApiTransport`; replaced with `_transport.subscribe_queue(zone_id, 100, cb)` which is the actual API method. Callback signature is `(response, msg)` where `response="Subscribed"` on first call and `msg.items` contains the queue. A `done` flag ignores subsequent change notifications.
+- Replaced `POST /api/queue/clear` browse-based implementation with a clean 501 response — confirmed the Roon Extension API has no queue-clearing mechanism (`hierarchy:'browse'` root has no Queue item; `hierarchy:'queue'` returns `InvalidHierarchy`). Response includes a workaround hint.
+- Reported by FunkBrother on Roon Community forum (post #12)
+
 ### New transport endpoints: mute, pause-all, standby, group, ungroup, transfer (2026-03-08)
 - Discovered 7 undocumented `RoonApiTransport` methods from official API docs: `mute`, `mute_all`, `pause_all`, `standby`, `toggle_standby`, `group_outputs`, `ungroup_outputs`, `transfer_zone`
 - Added `POST /api/mute` — mute/unmute a specific zone's output
