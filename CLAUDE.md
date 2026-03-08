@@ -156,6 +156,21 @@ PYEOF"
 
 ## Change History
 
+### Artist matching fix to prevent cover versions (2026-03-08)
+- Fixed bug where `/api/find-and-play` and `/api/playlist` could select cover recordings over the original artist (e.g. Frank Chacksfield orchestral covers instead of Simon & Garfunkel)
+- Added `pickBestMatch(items, index, artist)` helper in `extension.js` — case-insensitive substring match on Roon's `subtitle` (artist) field, falls back to index-based selection if no match
+- `find-and-play` now accepts optional `"artist"` in request body
+- `playlist` now accepts optional `"artist"` per track entry `{ query, type?, artist? }`
+- Both changes are backward-compatible — omitting `artist` preserves existing behaviour
+- Updated `cowork-skill/roon/SKILL.md` to instruct Claude to always pass `artist` when playing tracks for a specific artist
+- No Docker rebuild required — `extension.js` is volume-mounted; restart only
+
+### Fix urllib.parse import crash on Python 3.13 (2026-03-08)
+- Moved `import urllib.parse` to top-level imports in `roon_control.py`
+- Removed misplaced inline imports from inside `_get()` and `_post()`
+- Bug: Python 3.12+ (PEP 709 inlined comprehensions) treated `urllib` as an unassigned local variable, crashing with `NameError` when search params were passed
+- Reported by community member on Roon Labs forum
+
 ### Profiles investigation (2026-03-06)
 - Investigated whether Roon user profiles can be switched via the Extension API
 - Added `GET /api/profiles` to list available profiles and show which is active
