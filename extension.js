@@ -574,7 +574,8 @@ app.get('/api/queue/:zone_id', (req, res) => {
 });
 
 // POST /api/queue/clear  { zone_id }
-// Navigates the Roon browse hierarchy to find and execute the "Clear Queue" action.
+// Clears the queue by navigating Roon's 'queue' browse hierarchy to execute the Clear action.
+// Returns a diagnostic log if the action cannot be found, to assist with debugging.
 app.post('/api/queue/clear', (req, res) => {
   if (!requireCore(res)) return;
   const { zone_id } = req.body;
@@ -583,40 +584,31 @@ app.post('/api/queue/clear', (req, res) => {
   const msKey = `qclear-${Date.now()}-${Math.random()}`;
   const log = [];
 
-  _browse.browse({ hierarchy: 'browse', zone_or_output_id: zone_id, multi_session_key: msKey }, (err) => {
-    if (err) return res.status(500).json({ error: String(err) });
+  // Use the 'queue' hierarchy — this is distinct from 'browse' and should expose
+  // the queue contents and management actions (Clear, etc.)
+  _browse.browse({ hierarchy: 'queue', zone_or_output_id: zone_id, multi_session_key: msKey }, (err, bR) => {
+    if (err) return res.status(500).json({ error: String(err), log });
 
-    _browse.load({ hierarchy: 'browse', multi_session_key: msKey, count: 100, offset: 0 }, (err, rootR) => {
-      if (err) return res.status(500).json({ error: String(err) });
+    log.push({ step: 'queue hierarchy browse', action: bR.action });
 
-      const rootItems = rootR.items || [];
-      log.push({ step: 'root', items: rootItems.map(i => ({ title: i.title, hint: i.hint })) });
+    _browse.load({ hierarchy: 'queue', multi_session_key: msKey, count: 100, offset: 0 }, (err, rootR) => {
+      if (err) return res.status(500).json({ error: String(err), log });
 
-      const queueItem = rootItems.find(i => /queue/i.test(i.title));
-      if (!queueItem) {
-        return res.status(404).json({ error: 'Queue not found in root browse', log });
+      const items = rootR.items || [];
+      log.push({ step: 'queue hierarchy items', total: rootR.list && rootR.list.count, items: items.map(i => ({ title: i.title, hint: i.hint, item_key: i.item_key })) });
+
+      // Look for a "Clear" action — may appear as a header action or standalone item
+      const clearItem = items.find(i => /clear/i.test(i.title));
+      if (clearItem) {
+        _browse.browse({ hierarchy: 'queue', item_key: clearItem.item_key, zone_or_output_id: zone_id, multi_session_key: msKey }, (err, clearR) => {
+          if (err) return res.status(500).json({ error: String(err), log });
+          return res.json({ success: true, action: clearR.action });
+        });
+        return;
       }
 
-      _browse.browse({ hierarchy: 'browse', item_key: queueItem.item_key, zone_or_output_id: zone_id, multi_session_key: msKey }, (err) => {
-        if (err) return res.status(500).json({ error: String(err), log });
-
-        _browse.load({ hierarchy: 'browse', multi_session_key: msKey, count: 50, offset: 0 }, (err, qR) => {
-          if (err) return res.status(500).json({ error: String(err), log });
-
-          const qItems = qR.items || [];
-          log.push({ step: 'queue section', items: qItems.map(i => ({ title: i.title, hint: i.hint })) });
-
-          const clearItem = qItems.find(i => /clear/i.test(i.title));
-          if (!clearItem) {
-            return res.status(404).json({ error: 'Clear Queue action not found', log });
-          }
-
-          _browse.browse({ hierarchy: 'browse', item_key: clearItem.item_key, zone_or_output_id: zone_id, multi_session_key: msKey }, (err, clearR) => {
-            if (err) return res.status(500).json({ error: String(err), log });
-            res.json({ success: true, action: clearR.action });
-          });
-        });
-      });
+      // Clear not found at top level — return diagnostic so we can see what IS available
+      return res.status(404).json({ error: 'Clear action not found in queue hierarchy', log });
     });
   });
 });
