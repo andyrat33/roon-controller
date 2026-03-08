@@ -67,6 +67,13 @@ ssh admin@172.31.254.142 "docker restart roon-controller"
 | POST | `/api/play-album` | Search and play an entire album natively |
 | GET | `/api/profiles` | List profiles and which is active (read-only) |
 | POST | `/api/queue/clear` | Clear the queue for a zone |
+| POST | `/api/mute` | Mute/unmute a zone |
+| POST | `/api/mute/all` | Mute/unmute all zones |
+| POST | `/api/pause/all` | Pause all zones simultaneously |
+| POST | `/api/standby` | Toggle standby on a zone's output |
+| POST | `/api/group` | Group zones for synchronised playback |
+| POST | `/api/ungroup` | Ungroup zones |
+| POST | `/api/transfer` | Transfer queue from one zone to another |
 
 ---
 
@@ -156,6 +163,19 @@ PYEOF"
 ---
 
 ## Change History
+
+### New transport endpoints: mute, pause-all, standby, group, ungroup, transfer (2026-03-08)
+- Discovered 7 undocumented `RoonApiTransport` methods from official API docs: `mute`, `mute_all`, `pause_all`, `standby`, `toggle_standby`, `group_outputs`, `ungroup_outputs`, `transfer_zone`
+- Added `POST /api/mute` — mute/unmute a specific zone's output
+- Added `POST /api/mute/all` — mute/unmute all zones at once
+- Added `POST /api/pause/all` — pause all zones simultaneously
+- Added `POST /api/standby` — toggle standby on a zone's output via `toggle_standby(output, {}, cb)`
+- Added `POST /api/group` — group multiple zones' outputs for synchronised playback; accepts `zone_ids[]`, looks up first output of each zone, calls `group_outputs`
+- Added `POST /api/ungroup` — ungroup zones; same lookup pattern, calls `ungroup_outputs`
+- Added `POST /api/transfer` — move current queue from one zone to another via `transfer_zone(fromZone, toZone, cb)`
+- Added 7 corresponding subcommands to `roon_control.py`
+- Updated `cowork-skill/roon/SKILL.md` with sections for each endpoint including trigger phrases for natural language use
+- No Docker rebuild required — `extension.js` is volume-mounted; restart only
 
 ### Clear queue endpoint (2026-03-08)
 - Added `POST /api/queue/clear` to `extension.js` — navigates Roon's browse hierarchy to find and execute the "Clear Queue" action
