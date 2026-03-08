@@ -573,6 +573,54 @@ app.get('/api/queue/:zone_id', (req, res) => {
   });
 });
 
+// POST /api/queue/clear  { zone_id }
+// Navigates the Roon browse hierarchy to find and execute the "Clear Queue" action.
+app.post('/api/queue/clear', (req, res) => {
+  if (!requireCore(res)) return;
+  const { zone_id } = req.body;
+  if (!zone_id) return res.status(400).json({ error: 'zone_id is required' });
+
+  const msKey = `qclear-${Date.now()}-${Math.random()}`;
+  const log = [];
+
+  _browse.browse({ hierarchy: 'browse', zone_or_output_id: zone_id, multi_session_key: msKey }, (err) => {
+    if (err) return res.status(500).json({ error: String(err) });
+
+    _browse.load({ hierarchy: 'browse', multi_session_key: msKey, count: 100, offset: 0 }, (err, rootR) => {
+      if (err) return res.status(500).json({ error: String(err) });
+
+      const rootItems = rootR.items || [];
+      log.push({ step: 'root', items: rootItems.map(i => ({ title: i.title, hint: i.hint })) });
+
+      const queueItem = rootItems.find(i => /queue/i.test(i.title));
+      if (!queueItem) {
+        return res.status(404).json({ error: 'Queue not found in root browse', log });
+      }
+
+      _browse.browse({ hierarchy: 'browse', item_key: queueItem.item_key, zone_or_output_id: zone_id, multi_session_key: msKey }, (err) => {
+        if (err) return res.status(500).json({ error: String(err), log });
+
+        _browse.load({ hierarchy: 'browse', multi_session_key: msKey, count: 50, offset: 0 }, (err, qR) => {
+          if (err) return res.status(500).json({ error: String(err), log });
+
+          const qItems = qR.items || [];
+          log.push({ step: 'queue section', items: qItems.map(i => ({ title: i.title, hint: i.hint })) });
+
+          const clearItem = qItems.find(i => /clear/i.test(i.title));
+          if (!clearItem) {
+            return res.status(404).json({ error: 'Clear Queue action not found', log });
+          }
+
+          _browse.browse({ hierarchy: 'browse', item_key: clearItem.item_key, zone_or_output_id: zone_id, multi_session_key: msKey }, (err, clearR) => {
+            if (err) return res.status(500).json({ error: String(err), log });
+            res.json({ success: true, action: clearR.action });
+          });
+        });
+      });
+    });
+  });
+});
+
 // ─── Playlist (Queue Builder) ──────────────────────────────────
 // POST /api/playlist
 // { name: "My Playlist", zone_id: "...", tracks: [{query, type?}] }
@@ -799,6 +847,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`   POST /api/transport  { zone_id, action }`);
   console.log(`   POST /api/volume     { zone_id, how, value }`);
   console.log(`   GET  /api/queue/:zone_id`);
+  console.log(`   POST /api/queue/clear    { zone_id }`);
   console.log(`   POST /api/playlist   { name, tracks:[{query,type?}], create? }`);
   console.log(`   POST /api/play-album { zone_id, query, action? }`);
   console.log(`   GET  /api/profiles  (read-only — profile switching not supported by Extension API)`);

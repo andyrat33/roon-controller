@@ -66,6 +66,7 @@ ssh admin@172.31.254.142 "docker restart roon-controller"
 | POST | `/api/playlist` | Queue multiple tracks in order |
 | POST | `/api/play-album` | Search and play an entire album natively |
 | GET | `/api/profiles` | List profiles and which is active (read-only) |
+| POST | `/api/queue/clear` | Clear the queue for a zone |
 
 ---
 
@@ -155,6 +156,13 @@ PYEOF"
 ---
 
 ## Change History
+
+### Clear queue endpoint (2026-03-08)
+- Added `POST /api/queue/clear` to `extension.js` — navigates Roon's browse hierarchy to find and execute the "Clear Queue" action
+- The Roon Transport API has no direct `clear_queue()` method; the endpoint uses `hierarchy: 'browse'` with `zone_or_output_id` to discover queue management actions at the root level
+- Added `clear-queue` subcommand to `roon_control.py`
+- Updated `cowork-skill/roon/SKILL.md` to document the endpoint
+- No Docker rebuild required — `extension.js` is volume-mounted; restart only
 
 ### Artist matching fix to prevent cover versions (2026-03-08)
 - Fixed bug where `/api/find-and-play` and `/api/playlist` could select cover recordings over the original artist (e.g. Frank Chacksfield orchestral covers instead of Simon & Garfunkel)

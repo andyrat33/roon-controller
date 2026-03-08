@@ -145,6 +145,7 @@ do shell script "curl -s 'http://YOUR_NAS_IP:3001/api/zones'"
 | POST | `/api/transport` | Playback control (play/pause/skip etc.) |
 | POST | `/api/volume` | Volume control |
 | GET | `/api/queue/<zone_id>` | View current queue |
+| POST | `/api/queue/clear` | **Clear the queue** — removes all queued tracks |
 | POST | `/api/playlist` | Queue multiple tracks in order (save as playlist in Roon app) |
 | GET | `/api/inspect?q=<query>` | Debug: show Roon's exact action names for a track |
 | POST | `/api/shuffle` | Enable or disable shuffle for a zone |
@@ -240,6 +241,21 @@ r = subprocess.run(['curl','-s','-X','POST','http://172.31.254.142:3001/api/shuf
 print(r.stdout)
 PYEOF"
 ```
+
+## queue/clear
+
+Use this when the user wants to clear the queue, empty the queue, or remove all queued tracks.
+
+```json
+{ "zone_id": "..." }
+```
+
+```applescript
+set payload to "{\"zone_id\":\"YOUR_ZONE_ID\"}"
+do shell script "echo " & quoted form of payload & " > /tmp/rp.json && curl -s -X POST http://YOUR_NAS_IP:3001/api/queue/clear -H 'Content-Type: application/json' -d @/tmp/rp.json"
+```
+
+---
 
 ## volume
 
