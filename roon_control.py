@@ -163,6 +163,49 @@ def cmd_clear_queue(args):
     print(json.dumps(result, indent=2))
 
 
+def cmd_mute(args):
+    val = args.value.lower()
+    if val not in ('true', 'false'):
+        print("Error: value must be 'true' or 'false'", file=sys.stderr)
+        sys.exit(1)
+    result = _post('/mute', {'zone_id': args.zone_id, 'mute': val == 'true'})
+    print(json.dumps(result, indent=2))
+
+
+def cmd_mute_all(args):
+    val = args.value.lower()
+    if val not in ('true', 'false'):
+        print("Error: value must be 'true' or 'false'", file=sys.stderr)
+        sys.exit(1)
+    result = _post('/mute/all', {'mute': val == 'true'})
+    print(json.dumps(result, indent=2))
+
+
+def cmd_pause_all(args):
+    result = _post('/pause/all', {})
+    print(json.dumps(result, indent=2))
+
+
+def cmd_standby(args):
+    result = _post('/standby', {'zone_id': args.zone_id})
+    print(json.dumps(result, indent=2))
+
+
+def cmd_group(args):
+    result = _post('/group', {'zone_ids': args.zone_ids})
+    print(json.dumps(result, indent=2))
+
+
+def cmd_ungroup(args):
+    result = _post('/ungroup', {'zone_ids': args.zone_ids})
+    print(json.dumps(result, indent=2))
+
+
+def cmd_transfer(args):
+    result = _post('/transfer', {'from_zone_id': args.from_zone_id, 'to_zone_id': args.to_zone_id})
+    print(json.dumps(result, indent=2))
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 p = argparse.ArgumentParser(description='Cowork Roon Controller')
 sub = p.add_subparsers(dest='cmd', required=True)
@@ -216,6 +259,28 @@ plist.add_argument('tracks', nargs='+', metavar='track')
 cq = sub.add_parser('clear-queue')
 cq.add_argument('zone_id')
 
+mu = sub.add_parser('mute')
+mu.add_argument('zone_id')
+mu.add_argument('value', metavar='true|false')
+
+ma = sub.add_parser('mute-all')
+ma.add_argument('value', metavar='true|false')
+
+sub.add_parser('pause-all')
+
+sb = sub.add_parser('standby')
+sb.add_argument('zone_id')
+
+grp = sub.add_parser('group')
+grp.add_argument('zone_ids', nargs='+', metavar='zone_id')
+
+ug = sub.add_parser('ungroup')
+ug.add_argument('zone_ids', nargs='+', metavar='zone_id')
+
+tf = sub.add_parser('transfer')
+tf.add_argument('from_zone_id')
+tf.add_argument('to_zone_id')
+
 CMDS = {
     'status':        cmd_status,
     'zones':         cmd_zones,
@@ -229,6 +294,13 @@ CMDS = {
     'volume':        cmd_volume,
     'queue':         cmd_queue,
     'clear-queue':   cmd_clear_queue,
+    'mute':          cmd_mute,
+    'mute-all':      cmd_mute_all,
+    'pause-all':     cmd_pause_all,
+    'standby':       cmd_standby,
+    'group':         cmd_group,
+    'ungroup':       cmd_ungroup,
+    'transfer':      cmd_transfer,
     'browse':        cmd_browse,
 }
 

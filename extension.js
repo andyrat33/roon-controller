@@ -532,6 +532,103 @@ app.post('/api/shuffle', (req, res) => {
   });
 });
 
+// ─── Mute ─────────────────────────────────────────────────────
+// POST /api/mute  { zone_id, mute: true|false }
+app.post('/api/mute', (req, res) => {
+  if (!requireCore(res)) return;
+  const { zone_id, mute } = req.body;
+  if (mute === undefined) return res.status(400).json({ error: 'mute (boolean) is required' });
+  const zone = _zones[zone_id];
+  const output = zone?.outputs?.[0];
+  if (!output) return res.status(404).json({ error: 'Zone or output not found' });
+  _transport.mute(output, mute ? 'mute' : 'unmute', (err) => {
+    if (err) return res.status(500).json({ error: String(err) });
+    res.json({ success: true, muted: !!mute });
+  });
+});
+
+// POST /api/mute/all  { mute: true|false }
+app.post('/api/mute/all', (req, res) => {
+  if (!requireCore(res)) return;
+  const { mute } = req.body;
+  if (mute === undefined) return res.status(400).json({ error: 'mute (boolean) is required' });
+  _transport.mute_all(mute ? 'mute' : 'unmute', (err) => {
+    if (err) return res.status(500).json({ error: String(err) });
+    res.json({ success: true, muted: !!mute });
+  });
+});
+
+// ─── Pause All ────────────────────────────────────────────────
+// POST /api/pause/all
+app.post('/api/pause/all', (req, res) => {
+  if (!requireCore(res)) return;
+  _transport.pause_all((err) => {
+    if (err) return res.status(500).json({ error: String(err) });
+    res.json({ success: true });
+  });
+});
+
+// ─── Standby ──────────────────────────────────────────────────
+// POST /api/standby  { zone_id }  — toggles standby on the zone's output
+app.post('/api/standby', (req, res) => {
+  if (!requireCore(res)) return;
+  const { zone_id } = req.body;
+  if (!zone_id) return res.status(400).json({ error: 'zone_id is required' });
+  const zone = _zones[zone_id];
+  const output = zone?.outputs?.[0];
+  if (!output) return res.status(404).json({ error: 'Zone or output not found' });
+  _transport.toggle_standby(output, {}, (err) => {
+    if (err) return res.status(500).json({ error: String(err) });
+    res.json({ success: true });
+  });
+});
+
+// ─── Group / Ungroup ──────────────────────────────────────────
+// POST /api/group    { zone_ids: ["id1", "id2", ...] }  — sync outputs together
+// POST /api/ungroup  { zone_ids: ["id1", ...] }          — remove outputs from group
+app.post('/api/group', (req, res) => {
+  if (!requireCore(res)) return;
+  const { zone_ids } = req.body;
+  if (!Array.isArray(zone_ids) || zone_ids.length < 2)
+    return res.status(400).json({ error: 'zone_ids must be an array of at least 2 zone IDs' });
+  const outputs = zone_ids.map(id => _zones[id]?.outputs?.[0]).filter(Boolean);
+  if (outputs.length < 2) return res.status(404).json({ error: 'Fewer than 2 valid zones found' });
+  _transport.group_outputs(outputs, (err) => {
+    if (err) return res.status(500).json({ error: String(err) });
+    res.json({ success: true });
+  });
+});
+
+app.post('/api/ungroup', (req, res) => {
+  if (!requireCore(res)) return;
+  const { zone_ids } = req.body;
+  if (!Array.isArray(zone_ids) || zone_ids.length === 0)
+    return res.status(400).json({ error: 'zone_ids must be a non-empty array' });
+  const outputs = zone_ids.map(id => _zones[id]?.outputs?.[0]).filter(Boolean);
+  if (!outputs.length) return res.status(404).json({ error: 'No valid zones found' });
+  _transport.ungroup_outputs(outputs, (err) => {
+    if (err) return res.status(500).json({ error: String(err) });
+    res.json({ success: true });
+  });
+});
+
+// ─── Transfer Zone ────────────────────────────────────────────
+// POST /api/transfer  { from_zone_id, to_zone_id }
+// Moves the current queue from one zone to another.
+app.post('/api/transfer', (req, res) => {
+  if (!requireCore(res)) return;
+  const { from_zone_id, to_zone_id } = req.body;
+  if (!from_zone_id || !to_zone_id) return res.status(400).json({ error: 'from_zone_id and to_zone_id are required' });
+  const fromZone = _zones[from_zone_id];
+  const toZone   = _zones[to_zone_id];
+  if (!fromZone) return res.status(404).json({ error: `from_zone_id not found: ${from_zone_id}` });
+  if (!toZone)   return res.status(404).json({ error: `to_zone_id not found: ${to_zone_id}` });
+  _transport.transfer_zone(fromZone, toZone, (err) => {
+    if (err) return res.status(500).json({ error: String(err) });
+    res.json({ success: true });
+  });
+});
+
 // ─── Volume ───────────────────────────────────────────────────
 // POST /api/volume  { zone_id, how: "absolute"|"relative"|"relative_step", value: number }
 app.post('/api/volume', (req, res) => {
@@ -845,6 +942,13 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`   GET  /api/browse[?item_key=<key>]`);
   console.log(`   POST /api/play       { zone_id, item_key, action? }`);
   console.log(`   POST /api/transport  { zone_id, action }`);
+  console.log(`   POST /api/mute       { zone_id, mute: true|false }`);
+  console.log(`   POST /api/mute/all   { mute: true|false }`);
+  console.log(`   POST /api/pause/all`);
+  console.log(`   POST /api/standby    { zone_id }`);
+  console.log(`   POST /api/group      { zone_ids: [...] }`);
+  console.log(`   POST /api/ungroup    { zone_ids: [...] }`);
+  console.log(`   POST /api/transfer   { from_zone_id, to_zone_id }`);
   console.log(`   POST /api/volume     { zone_id, how, value }`);
   console.log(`   GET  /api/queue/:zone_id`);
   console.log(`   POST /api/queue/clear    { zone_id }`);

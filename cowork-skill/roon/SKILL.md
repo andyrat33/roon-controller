@@ -150,6 +150,13 @@ do shell script "curl -s 'http://YOUR_NAS_IP:3001/api/zones'"
 | GET | `/api/inspect?q=<query>` | Debug: show Roon's exact action names for a track |
 | POST | `/api/shuffle` | Enable or disable shuffle for a zone |
 | POST | `/api/play-album` | **Play an entire album** — natively queues all tracks in order |
+| POST | `/api/mute` | Mute or unmute a zone |
+| POST | `/api/mute/all` | Mute or unmute every zone at once |
+| POST | `/api/pause/all` | Pause all zones simultaneously |
+| POST | `/api/standby` | Toggle standby on a zone's output |
+| POST | `/api/group` | Group zones for synchronised multi-room playback |
+| POST | `/api/ungroup` | Ungroup zones previously grouped |
+| POST | `/api/transfer` | Move the current queue from one zone to another |
 
 ---
 
@@ -253,6 +260,120 @@ Use this when the user wants to clear the queue, empty the queue, or remove all 
 ```applescript
 set payload to "{\"zone_id\":\"YOUR_ZONE_ID\"}"
 do shell script "echo " & quoted form of payload & " > /tmp/rp.json && curl -s -X POST http://YOUR_NAS_IP:3001/api/queue/clear -H 'Content-Type: application/json' -d @/tmp/rp.json"
+```
+
+---
+
+## mute
+
+Use this to **mute or unmute a specific zone**. Prefer mute over setting volume to 0 — mute preserves the volume level so it can be restored unchanged.
+
+Triggers: "mute the kitchen", "unmute the living room", "silence the office"
+
+```json
+{ "zone_id": "...", "mute": true }
+```
+
+```applescript
+set payload to "{\"zone_id\":\"YOUR_ZONE_ID\",\"mute\":true}"
+do shell script "echo " & quoted form of payload & " > /tmp/rp.json && curl -s -X POST http://YOUR_NAS_IP:3001/api/mute -H 'Content-Type: application/json' -d @/tmp/rp.json"
+```
+
+---
+
+## mute/all
+
+Mute or unmute **every zone at once**.
+
+Triggers: "mute everything", "unmute all rooms", "silence all zones"
+
+```json
+{ "mute": true }
+```
+
+```applescript
+set payload to "{\"mute\":true}"
+do shell script "echo " & quoted form of payload & " > /tmp/rp.json && curl -s -X POST http://YOUR_NAS_IP:3001/api/mute/all -H 'Content-Type: application/json' -d @/tmp/rp.json"
+```
+
+---
+
+## pause/all
+
+**Pause every zone simultaneously.** No body required.
+
+Triggers: "pause all music", "stop everything", "quiet please", "pause all rooms"
+
+```applescript
+do shell script "curl -s -X POST http://YOUR_NAS_IP:3001/api/pause/all -H 'Content-Type: application/json' -d '{}'"
+```
+
+---
+
+## standby
+
+**Toggle standby** on a zone's output (puts a connected AV device into standby or wakes it). Behaviour depends on whether the output supports standby control (e.g. CEC-enabled displays or Roon-ready devices).
+
+Triggers: "put the office to sleep", "standby the living room", "turn off the hegel"
+
+```json
+{ "zone_id": "..." }
+```
+
+```applescript
+set payload to "{\"zone_id\":\"YOUR_ZONE_ID\"}"
+do shell script "echo " & quoted form of payload & " > /tmp/rp.json && curl -s -X POST http://YOUR_NAS_IP:3001/api/standby -H 'Content-Type: application/json' -d @/tmp/rp.json"
+```
+
+---
+
+## group
+
+**Sync two or more zones** so they play the same music in perfect time. Pass an array of at least 2 zone IDs. The zones will merge into a single grouped zone.
+
+Triggers: "play in both the kitchen and living room", "sync the family room and kitchen", "group all the downstairs zones"
+
+```json
+{ "zone_ids": ["zone_id_1", "zone_id_2"] }
+```
+
+```applescript
+set payload to "{\"zone_ids\":[\"ZONE_ID_1\",\"ZONE_ID_2\"]}"
+do shell script "echo " & quoted form of payload & " > /tmp/rp.json && curl -s -X POST http://YOUR_NAS_IP:3001/api/group -H 'Content-Type: application/json' -d @/tmp/rp.json"
+```
+
+---
+
+## ungroup
+
+**Remove zones from a group** so they play independently again.
+
+Triggers: "ungroup the kitchen", "separate the zones", "stop syncing the rooms"
+
+```json
+{ "zone_ids": ["zone_id_1"] }
+```
+
+```applescript
+set payload to "{\"zone_ids\":[\"YOUR_ZONE_ID\"]}"
+do shell script "echo " & quoted form of payload & " > /tmp/rp.json && curl -s -X POST http://YOUR_NAS_IP:3001/api/ungroup -H 'Content-Type: application/json' -d @/tmp/rp.json"
+```
+
+---
+
+## transfer
+
+**Move the current queue from one zone to another.** The music stops in the source zone and continues seamlessly in the destination zone from the same point.
+
+Triggers: "move the music to the kitchen", "transfer to the office", "continue playing in the living room", "bring the music upstairs"
+
+```json
+{ "from_zone_id": "...", "to_zone_id": "..." }
+```
+
+```applescript
+set payload to "{\"from_zone_id\":\"FROM_ZONE_ID\",\"to_zone_id\":\"TO_ZONE_ID\"}"
+do shell script "echo " & quoted form of payload & " > /tmp/rp.json && curl -s -X POST http://YOUR_NAS_IP:3001/api/transfer -H 'Content-Type: application/json' -d @/tmp/rp.json"
 ```
 
 ---
