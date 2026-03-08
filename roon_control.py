@@ -24,6 +24,7 @@ import json
 import argparse
 import urllib.request
 import urllib.error
+import urllib.parse
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 # Change QNAP_IP to your QNAP's actual IP address (e.g. 192.168.1.50)
@@ -38,7 +39,6 @@ def _get(path, params=None):
     if params:
         qs = '&'.join(f'{k}={urllib.parse.quote(str(v))}' for k, v in params.items())
         url = f'{url}?{qs}'
-    import urllib.parse
     req = urllib.request.Request(url)
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
@@ -53,7 +53,6 @@ def _get(path, params=None):
 
 
 def _post(path, payload):
-    import urllib.parse
     data = json.dumps(payload).encode()
     req = urllib.request.Request(
         BASE_URL + path,
