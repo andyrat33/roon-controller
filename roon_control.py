@@ -304,5 +304,6 @@ CMDS = {
     'browse':        cmd_browse,
 }
 
-args = p.parse_args()
-CMDS[args.cmd](args)
+if __name__ == '__main__':
+    args = p.parse_args()
+    CMDS[args.cmd](args)
