@@ -158,6 +158,11 @@ def cmd_playlist(args):
     print(json.dumps(result, indent=2))
 
 
+def cmd_clear_queue(args):
+    result = _post('/queue/clear', {'zone_id': args.zone_id})
+    print(json.dumps(result, indent=2))
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 p = argparse.ArgumentParser(description='Cowork Roon Controller')
 sub = p.add_subparsers(dest='cmd', required=True)
@@ -208,6 +213,9 @@ plist = sub.add_parser('playlist')
 plist.add_argument('zone_id')
 plist.add_argument('tracks', nargs='+', metavar='track')
 
+cq = sub.add_parser('clear-queue')
+cq.add_argument('zone_id')
+
 CMDS = {
     'status':        cmd_status,
     'zones':         cmd_zones,
@@ -220,6 +228,7 @@ CMDS = {
     'transport':     cmd_transport,
     'volume':        cmd_volume,
     'queue':         cmd_queue,
+    'clear-queue':   cmd_clear_queue,
     'browse':        cmd_browse,
 }
 
