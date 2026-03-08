@@ -242,18 +242,20 @@ print(r.stdout)
 PYEOF"
 ```
 
-## queue/clear
+## queue/clear — KNOWN LIMITATION
 
-Use this when the user wants to clear the queue, empty the queue, or remove all queued tracks.
+**The Roon Extension API does not expose queue clearing to third-party extensions.**
 
-```json
-{ "zone_id": "..." }
-```
+The `/api/queue/clear` endpoint exists and will confirm this with a 501 response explaining the limitation.
 
-```applescript
-set payload to "{\"zone_id\":\"YOUR_ZONE_ID\"}"
-do shell script "echo " & quoted form of payload & " > /tmp/rp.json && curl -s -X POST http://YOUR_NAS_IP:3001/api/queue/clear -H 'Content-Type: application/json' -d @/tmp/rp.json"
-```
+**How to handle "clear the queue" requests:**
+
+1. Tell the user: *"The Roon API doesn't let me clear the queue directly. You can clear it in the Roon app (open Queue view → ⋮ → Clear Queue). Alternatively, just tell me what to play next — using 'Play Now' will replace the current queue."*
+
+2. If the user wants to stop music AND start fresh: stop playback with the transport endpoint, then confirm that the next "Play Now" will replace the queue.
+
+**Workaround — play something to replace the queue:**
+If the user wants an immediate queue-clear and then wants to play something specific, use `find-and-play` or `play-album` with `"action": "Play Now"` for that item. This atomically clears the queue and starts the new content.
 
 ---
 

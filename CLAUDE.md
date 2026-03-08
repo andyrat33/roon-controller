@@ -152,17 +152,20 @@ PYEOF"
 - The Roon Extension API does **not** support profile switching. Profiles are tied to Roon Remotes (apps on phones/tablets), and the Extension API runs as a separate client — it cannot change the active profile for any Roon Remote. The `/api/profiles` endpoint can read the profile list but not switch. Profiles in this setup: James, House, Anne, Andrew, Claude.
 - Roon's internal action strings are case-sensitive. Use exactly: `Play Now`, `Queue`, `Add Next`, `Start Radio`.
 - Browse sessions use `multi_session_key` to keep `item_key` values valid across multiple browse/load calls within the same search context.
+- The Roon Extension API does **not** support clearing the queue. The `hierarchy: 'browse'` root does not include a Queue item, and `hierarchy: 'queue'` returns `InvalidHierarchy`. The only way to replace the queue is via "Play Now" on any track or album.
 
 ---
 
 ## Change History
 
-### Clear queue endpoint (2026-03-08)
-- Added `POST /api/queue/clear` to `extension.js` — navigates Roon's browse hierarchy to find and execute the "Clear Queue" action
-- The Roon Transport API has no direct `clear_queue()` method; the endpoint uses `hierarchy: 'browse'` with `zone_or_output_id` to discover queue management actions at the root level
-- Added `clear-queue` subcommand to `roon_control.py`
-- Updated `cowork-skill/roon/SKILL.md` to document the endpoint
-- No Docker rebuild required — `extension.js` is volume-mounted; restart only
+### Clear queue endpoint — confirmed API limitation (2026-03-08)
+- `POST /api/queue/clear` investigated and confirmed: the Roon Extension API does NOT expose queue clearing to third-party extensions
+- Confirmed: `hierarchy: 'browse'` root has no "Queue" item (shows only Library, Playlists, My Live Radio, Genres, TIDAL, Settings)
+- Confirmed: `hierarchy: 'queue'` returns `InvalidHierarchy` — not a valid browse hierarchy
+- The endpoint returns 501 with an explanation and suggests using the Roon app or "Play Now" as a workaround
+- "Play Now" on any track/album atomically replaces the queue — this is the only queue-clearing mechanism the Extension API exposes
+- Updated `cowork-skill/roon/SKILL.md` with guidance for Claude to handle "clear the queue" requests
+- Added `clear-queue` subcommand to `roon_control.py` (also returns 501)
 
 ### Artist matching fix to prevent cover versions (2026-03-08)
 - Fixed bug where `/api/find-and-play` and `/api/playlist` could select cover recordings over the original artist (e.g. Frank Chacksfield orchestral covers instead of Simon & Garfunkel)
