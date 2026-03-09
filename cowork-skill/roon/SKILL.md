@@ -218,6 +218,81 @@ These are the real strings Roon uses internally. Wrong names silently fall back 
 
 ---
 
+## Research-first strategy for complex queries
+
+When the user asks for songs matching **chart history, era, genre, or editorial criteria**,
+do NOT rely on Roon's search ranking — it is driven by library metadata and may surface
+rereleases, covers, or wrong-era versions. Instead:
+
+### When to use internet search first
+
+Trigger `web_search` **before any Roon API call** when the query:
+- References chart positions ("Top 10", "number 1", "hit", "charted")
+- References a specific year, era, or decade ("1988", "summer of '69", "80s")
+- References a chart or market ("UK charts", "Billboard Hot 100")
+- References seasons/time periods ("summer hits", "Christmas number ones")
+- Is historically or culturally framed ("songs everyone knew in 1992")
+- Involves a "best of", "classic", or editorial-style list
+
+Do NOT trigger internet search for:
+- User names a specific song + artist directly
+- User asks to play an album by name
+- Playback control (skip, pause, volume, etc.)
+- Artist discography queries ("play all of Radiohead")
+
+### Step 1 — Search the internet first
+
+Use `web_search` to resolve the exact tracks before calling Roon. Examples:
+
+| User request | Search query |
+|---|---|
+| "Top 10 UK hits, summer 1988" | `UK Top 10 singles July August 1988 official charts` |
+| "10 number ones from the 70s" | `UK number one singles 1970s list` |
+| "Christmas number ones" | `UK Christmas number one singles list` |
+| "Best Britpop songs" | `Britpop essential songs list Oasis Blur Pulp` |
+
+Prefer authoritative sources: officialcharts.com, Wikipedia chart lists, Billboard archives.
+
+### Step 2 — Build the playlist from research
+
+Once you have exact titles and original artists, use `/api/playlist` with `artist` on
+every track. This filters out covers and rereleases that Roon may rank higher.
+
+**IMPORTANT:** Put only the **song title** in `query` — do NOT include the artist name
+in the query string. Karaoke and tribute tracks often include the original artist name
+in their track title (e.g. `"...made popular by Yazz..."`), which causes them to rank
+highly when the artist name appears in the query. The `artist` field handles filtering
+separately, so adding it to `query` only helps cover versions win.
+
+```json
+POST /api/playlist
+{
+  "name": "Summer 1988 UK Top 10",
+  "zone_id": "YOUR_ZONE_ID",
+  "tracks": [
+    { "query": "The Only Way Is Up",       "artist": "Yazz" },
+    { "query": "A Groovy Kind of Love",    "artist": "Phil Collins" },
+    { "query": "I Should Be So Lucky",     "artist": "Kylie Minogue" },
+    { "query": "Nothing's Gonna Stop Us Now", "artist": "Starship" }
+  ]
+}
+```
+
+### Step 3 — Tell the user what you found
+
+Before queuing, briefly tell the user which songs you found from your research (e.g.
+"I found these 10 songs that were in the UK Top 10 during summer 1988: ..."). This
+lets them correct or adjust before playback starts.
+
+### Why this matters
+
+Roon sorts search results by library relevance, not release date. Searching for a 1988
+hit may return a 2018 remaster or a cover version ranked above the original. Internet
+search gives you the canonical title + original artist, and the `artist` field in the
+playlist payload ensures Roon selects the right version.
+
+---
+
 ## transport
 
 ```json
