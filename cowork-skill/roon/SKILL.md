@@ -33,59 +33,39 @@ cannot reach the NAS directly ("No route to host"), so you need to escape to the
 
 ### macOS — osascript (recommended)
 
-Use `osascript` to run AppleScript directly on the Mac host. Always use the **Python
-heredoc pattern** for POST requests — it handles apostrophes in track titles safely
-(e.g. "Don't Stop Believin'", "It's Now or Never") and gives explicit output so you
-can confirm success.
+Use `osascript` to run AppleScript directly on the Mac host. Always use the **bash
+heredoc pattern** for POST requests — it writes JSON to a temp file and curls from it,
+handling apostrophes in track titles naturally (e.g. "Don't Stop Believin'",
+"It's Now or Never") with minimal quoting layers.
 
-**DO NOT** use `quoted form of` with a JSON string — apostrophes in track titles will
-break the shell command.
+**DO NOT** use `quoted form of` with a JSON string — apostrophes break the shell command.
+**DO NOT** use a Python heredoc inside `do shell script` — nested quoting between
+AppleScript → shell → Python causes syntax errors when track titles contain apostrophes.
 
 **GET:**
 ```applescript
 do shell script "curl -s 'http://YOUR_NAS_IP:3001/api/status'"
 ```
 
-**POST — use this Python heredoc pattern:**
+**POST — use this bash heredoc pattern:**
 ```applescript
-do shell script "python3 << 'PYEOF'
-import json, subprocess, tempfile
-
-zone_id = 'YOUR_ZONE_ID'
-payload = {
-    'zone_id': zone_id,
-    'query': \"Don't Stop Believin'\",
-    'type': 'Tracks',
-    'artist': 'Journey',
-    'action': 'Play Now'
+do shell script "cat > /tmp/roon_api.json << 'EOF'
+{
+  \"zone_id\": \"YOUR_ZONE_ID\",
+  \"query\": \"Don't Stop Believin'\",
+  \"type\": \"Tracks\",
+  \"artist\": \"Journey\",
+  \"action\": \"Play Now\"
 }
-
-with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-    json.dump(payload, f)
-    tmp = f.name
-
-r = subprocess.run(
-    ['curl', '-s', '-X', 'POST',
-     'http://YOUR_NAS_IP:3001/api/find-and-play',
-     '-H', 'Content-Type: application/json',
-     '-d', '@' + tmp],
-    capture_output=True, text=True
-)
-
-try:
-    resp = json.loads(r.stdout)
-    print('OK: ' + resp.get('playing', str(resp)) if resp.get('success') else 'Error: ' + str(resp))
-except:
-    print('Raw: ' + r.stdout)
-PYEOF"
+EOF
+curl -s -X POST http://YOUR_NAS_IP:3001/api/find-and-play -H 'Content-Type: application/json' -d @/tmp/roon_api.json"
 ```
 
-Key rules for this pattern:
-- Use `python3 << 'PYEOF'` — **not** `python3 /dev/stdin <<'PYEOF'` (the `/dev/stdin` form does not work)
-- Use string concatenation (`api_base + '/find-and-play'`) — not f-strings (unreliable in osascript)
-- Always `print(r.stdout)` — captured output is not returned to the user otherwise
-- Parse the JSON response and check `success` to confirm the API call worked
-- Use `tempfile.NamedTemporaryFile` rather than a hardcoded `/tmp/rp.json` path
+Why this works:
+- Only two quoting layers: AppleScript → shell (no Python interpreter in between)
+- Apostrophes in JSON values are natural in a bash heredoc — no escaping needed
+- Only JSON double-quote characters need `\"` escaping (they're inside the outer AppleScript string)
+- Curl reads from the file with `@/tmp/roon_api.json` — no inline JSON quoting
 
 > All `osascript` / AppleScript code blocks in this file are **macOS only**.
 
