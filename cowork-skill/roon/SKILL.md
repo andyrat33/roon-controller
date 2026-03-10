@@ -46,39 +46,38 @@ http://YOUR_NAS_IP:3001/api
 
 ### macOS — call the osascript tool directly
 
-Call the `osascript` tool with AppleScript. Always use the **bash heredoc pattern**
-for POST requests — it writes JSON to a temp file and curls from it, handling
-apostrophes in track titles naturally (e.g. "Don't Stop Believin'",
-"It's Now or Never") with minimal quoting layers.
-
-**DO NOT** use `quoted form of` with a JSON string — apostrophes break the shell command.
-**DO NOT** use a Python heredoc inside `do shell script` — nested quoting between
-AppleScript → shell → Python causes syntax errors when track titles contain apostrophes.
+Call the `osascript` tool with AppleScript.
 
 **GET:**
 ```applescript
 do shell script "curl -s 'http://YOUR_NAS_IP:3001/api/status'"
 ```
 
-**POST — use this bash heredoc pattern:**
+**POST — use Python + subprocess + json.dumps() (recommended):**
+
+This is the most reliable pattern. Python handles apostrophes natively; `json.dumps()`
+serialises the payload correctly; `subprocess` with a list passes JSON to curl as a
+single argument without any shell interpretation.
+
 ```applescript
-do shell script "cat > /tmp/roon_api.json << 'EOF'
-{
-  \"zone_id\": \"YOUR_ZONE_ID\",
-  \"query\": \"Don't Stop Believin'\",
-  \"type\": \"Tracks\",
-  \"artist\": \"Journey\",
-  \"action\": \"Play Now\"
-}
-EOF
-curl -s -X POST http://YOUR_NAS_IP:3001/api/find-and-play -H 'Content-Type: application/json' -d @/tmp/roon_api.json"
+do shell script "python3 /dev/stdin << 'PYEOF'
+import json, subprocess
+payload = {'zone_id': 'YOUR_ZONE_ID', 'query': \"Don't Stop Believin'\", 'type': 'Tracks', 'artist': \"Journey\", 'action': 'Play Now'}
+r = subprocess.run(['curl','-s','-X','POST','http://YOUR_NAS_IP:3001/api/find-and-play','-H','Content-Type: application/json','-d',json.dumps(payload)], capture_output=True, text=True, timeout=5)
+print(r.stdout)
+PYEOF"
 ```
 
-Why this works:
-- Only two quoting layers: AppleScript → shell (no Python interpreter in between)
-- Apostrophes in JSON values are natural in a bash heredoc — no escaping needed
-- Only JSON double-quote characters need `\"` escaping (they're inside the outer AppleScript string)
-- Curl reads from the file with `@/tmp/roon_api.json` — no inline JSON quoting
+**Quoting rules for the Python dict:**
+- Values that may contain apostrophes → use `\"...\"` (double-quoted Python string, `"` escaped for AppleScript)
+- Values with no apostrophes → use `'...'` (single-quoted Python string)
+- Booleans → `True` / `False` (Python, not JSON `true`/`false` — `json.dumps()` converts them)
+
+**DO NOT:**
+- Use `quoted form of` — apostrophes break the shell command
+- Construct JSON by string concatenation across quoting layers — apostrophes corrupt the payload
+- Use nested heredocs (heredoc inside a heredoc) — AppleScript parser error `-2740`
+- Use multi-line AppleScript with `¬` — line continuations break as a single `-e` argument
 
 > All `osascript` / AppleScript code blocks in this file are **macOS only**.
 
@@ -372,8 +371,7 @@ Use this when the user wants to clear the queue, empty the queue, or remove all 
 ```
 
 ```applescript
-set payload to "{\"zone_id\":\"YOUR_ZONE_ID\"}"
-do shell script "echo " & quoted form of payload & " > /tmp/rp.json && curl -s -X POST http://YOUR_NAS_IP:3001/api/queue/clear -H 'Content-Type: application/json' -d @/tmp/rp.json"
+do shell script "curl -s -X POST http://YOUR_NAS_IP:3001/api/queue/clear -H 'Content-Type: application/json' -d '{\"zone_id\":\"YOUR_ZONE_ID\"}'"
 ```
 
 ---
@@ -389,8 +387,7 @@ Triggers: "mute the kitchen", "unmute the living room", "silence the office"
 ```
 
 ```applescript
-set payload to "{\"zone_id\":\"YOUR_ZONE_ID\",\"mute\":true}"
-do shell script "echo " & quoted form of payload & " > /tmp/rp.json && curl -s -X POST http://YOUR_NAS_IP:3001/api/mute -H 'Content-Type: application/json' -d @/tmp/rp.json"
+do shell script "curl -s -X POST http://YOUR_NAS_IP:3001/api/mute -H 'Content-Type: application/json' -d '{\"zone_id\":\"YOUR_ZONE_ID\",\"mute\":true}'"
 ```
 
 ---
@@ -406,8 +403,7 @@ Triggers: "mute everything", "unmute all rooms", "silence all zones"
 ```
 
 ```applescript
-set payload to "{\"mute\":true}"
-do shell script "echo " & quoted form of payload & " > /tmp/rp.json && curl -s -X POST http://YOUR_NAS_IP:3001/api/mute/all -H 'Content-Type: application/json' -d @/tmp/rp.json"
+do shell script "curl -s -X POST http://YOUR_NAS_IP:3001/api/mute/all -H 'Content-Type: application/json' -d '{\"mute\":true}'"
 ```
 
 ---
@@ -435,8 +431,7 @@ Triggers: "put the office to sleep", "standby the living room", "turn off the he
 ```
 
 ```applescript
-set payload to "{\"zone_id\":\"YOUR_ZONE_ID\"}"
-do shell script "echo " & quoted form of payload & " > /tmp/rp.json && curl -s -X POST http://YOUR_NAS_IP:3001/api/standby -H 'Content-Type: application/json' -d @/tmp/rp.json"
+do shell script "curl -s -X POST http://YOUR_NAS_IP:3001/api/standby -H 'Content-Type: application/json' -d '{\"zone_id\":\"YOUR_ZONE_ID\"}'"
 ```
 
 ---
@@ -452,8 +447,7 @@ Triggers: "play in both the kitchen and living room", "sync the family room and 
 ```
 
 ```applescript
-set payload to "{\"zone_ids\":[\"ZONE_ID_1\",\"ZONE_ID_2\"]}"
-do shell script "echo " & quoted form of payload & " > /tmp/rp.json && curl -s -X POST http://YOUR_NAS_IP:3001/api/group -H 'Content-Type: application/json' -d @/tmp/rp.json"
+do shell script "curl -s -X POST http://YOUR_NAS_IP:3001/api/group -H 'Content-Type: application/json' -d '{\"zone_ids\":[\"ZONE_ID_1\",\"ZONE_ID_2\"]}'"
 ```
 
 ---
@@ -469,8 +463,7 @@ Triggers: "ungroup the kitchen", "separate the zones", "stop syncing the rooms"
 ```
 
 ```applescript
-set payload to "{\"zone_ids\":[\"YOUR_ZONE_ID\"]}"
-do shell script "echo " & quoted form of payload & " > /tmp/rp.json && curl -s -X POST http://YOUR_NAS_IP:3001/api/ungroup -H 'Content-Type: application/json' -d @/tmp/rp.json"
+do shell script "curl -s -X POST http://YOUR_NAS_IP:3001/api/ungroup -H 'Content-Type: application/json' -d '{\"zone_ids\":[\"YOUR_ZONE_ID\"]}'"
 ```
 
 ---
@@ -486,8 +479,7 @@ Triggers: "move the music to the kitchen", "transfer to the office", "continue p
 ```
 
 ```applescript
-set payload to "{\"from_zone_id\":\"FROM_ZONE_ID\",\"to_zone_id\":\"TO_ZONE_ID\"}"
-do shell script "echo " & quoted form of payload & " > /tmp/rp.json && curl -s -X POST http://YOUR_NAS_IP:3001/api/transfer -H 'Content-Type: application/json' -d @/tmp/rp.json"
+do shell script "curl -s -X POST http://YOUR_NAS_IP:3001/api/transfer -H 'Content-Type: application/json' -d '{\"from_zone_id\":\"FROM_ZONE_ID\",\"to_zone_id\":\"TO_ZONE_ID\"}'"
 ```
 
 ---
@@ -530,40 +522,37 @@ Include `"artist"` in each track entry to prevent cover versions from being sele
 The value is matched case-insensitively against Roon's artist field. Omitting it falls
 back to Roon's top result.
 
-Use a **single bash heredoc** to write the JSON to a file then curl it. This is the
-only approach that handles apostrophes in track names correctly without hitting
-AppleScript parser limits:
+Use **Python + subprocess** — same pattern as single-track playback, but with a list
+of tracks in the payload. Python handles apostrophes natively; `json.dumps()` serialises
+the whole structure correctly in one step.
 
 ```applescript
-do shell script "cat > /tmp/roon_api.json << 'EOF'
-{
-  \"name\": \"My 1988 Mix\",
-  \"zone_id\": \"YOUR_ZONE_ID\",
-  \"tracks\": [
-    {\"query\": \"The Sound of Silence\", \"artist\": \"Simon & Garfunkel\"},
-    {\"query\": \"Mrs Robinson\",         \"artist\": \"Simon & Garfunkel\"},
-    {\"query\": \"Hotel California\",     \"artist\": \"Eagles\"}
-  ]
+do shell script "python3 /dev/stdin << 'PYEOF'
+import json, subprocess
+payload = {
+    'name': 'My 1988 Mix',
+    'zone_id': 'YOUR_ZONE_ID',
+    'tracks': [
+        {'query': 'The Sound of Silence', 'artist': 'Simon & Garfunkel'},
+        {'query': 'Mrs Robinson',         'artist': 'Simon & Garfunkel'},
+        {'query': \"Don't You Want Me\",  'artist': 'Human League'},
+        {'query': 'Hotel California',     'artist': 'Eagles'},
+    ]
 }
-EOF
-curl -s -X POST http://YOUR_NAS_IP:3001/api/playlist -H 'Content-Type: application/json' -d @/tmp/roon_api.json"
+r = subprocess.run(['curl','-s','-X','POST','http://YOUR_NAS_IP:3001/api/playlist','-H','Content-Type: application/json','-d',json.dumps(payload)], capture_output=True, text=True, timeout=30)
+print(r.stdout)
+PYEOF"
 ```
 
-> **Do NOT use nested heredocs** (heredoc inside a heredoc) — AppleScript's parser
-> fails with `A property can't go after this """. (-2740)`. One heredoc level only.
+### Option B — chain individual find-and-play calls (alternative)
 
-### Option B — chain individual find-and-play calls (for long lists or when /api/playlist isn't suitable)
-
-Chain multiple curl calls with `&&` inside a single `do shell script`. First track uses
-`Play Now`, subsequent tracks use `Queue`. This avoids all heredoc nesting issues and
-handles any payload size.
+If the payload would be very large, chain individual `find-and-play` calls via `&&`.
+**Only use this when none of the track names or artists contain apostrophes** — inline
+JSON in shell single quotes is terminated by any `'` character.
 
 ```applescript
-do shell script "curl -s -X POST http://YOUR_NAS_IP:3001/api/find-and-play -H 'Content-Type: application/json' -d '{\"zone_id\":\"YOUR_ZONE_ID\",\"query\":\"Song One\",\"type\":\"Tracks\",\"artist\":\"Artist One\",\"action\":\"Play Now\"}' && curl -s -X POST http://YOUR_NAS_IP:3001/api/find-and-play -H 'Content-Type: application/json' -d '{\"zone_id\":\"YOUR_ZONE_ID\",\"query\":\"Song Two\",\"type\":\"Tracks\",\"artist\":\"Artist Two\",\"action\":\"Queue\"}' && curl -s -X POST http://YOUR_NAS_IP:3001/api/find-and-play -H 'Content-Type: application/json' -d '{\"zone_id\":\"YOUR_ZONE_ID\",\"query\":\"Song Three\",\"type\":\"Tracks\",\"artist\":\"Artist Three\",\"action\":\"Queue\"}'"
+do shell script "curl -s -X POST http://YOUR_NAS_IP:3001/api/find-and-play -H 'Content-Type: application/json' -d '{\"zone_id\":\"YOUR_ZONE_ID\",\"query\":\"Song One\",\"type\":\"Tracks\",\"artist\":\"Artist One\",\"action\":\"Play Now\"}' && curl -s -X POST http://YOUR_NAS_IP:3001/api/find-and-play -H 'Content-Type: application/json' -d '{\"zone_id\":\"YOUR_ZONE_ID\",\"query\":\"Song Two\",\"type\":\"Tracks\",\"artist\":\"Artist Two\",\"action\":\"Queue\"}'"
 ```
-
-> **Do NOT use multi-line AppleScript with `¬`** — line continuations break when the
-> script is passed as a single `-e` argument to osascript. Keep everything on one line.
 
 ---
 
