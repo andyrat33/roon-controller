@@ -159,10 +159,18 @@ PYEOF"
 - The Roon Extension API does **not** support profile switching. Profiles are tied to Roon Remotes (apps on phones/tablets), and the Extension API runs as a separate client — it cannot change the active profile for any Roon Remote. The `/api/profiles` endpoint can read the profile list but not switch. Profiles in this setup: James, House, Anne, Andrew, Claude.
 - Roon's internal action strings are case-sensitive. Use exactly: `Play Now`, `Queue`, `Add Next`, `Start Radio`.
 - Browse sessions use `multi_session_key` to keep `item_key` values valid across multiple browse/load calls within the same search context.
+- The `/api/standby` endpoint (`toggle_standby`) returns `InvalidRequest` for the Hegel zone — the Hegel amp output does not support standby via the Roon Extension API. The endpoint may work for other output types.
 
 ---
 
 ## Change History
+
+### Standby test on Hegel — confirmed not supported (2026-03-10)
+- Tested `POST /api/standby` against the Hegel zone (`1601263ad0b4da78019b79485617433fd073`)
+- Roon returns `{"error":"InvalidRequest"}` (HTTP 500) — `toggle_standby` is rejected for this output
+- The Hegel amp does not expose standby control through the Roon Extension API
+- The endpoint and code are correct; this is a per-output capability limitation
+- Documented in Roon Extension API Notes
 
 ### Fix GET /api/queue and remove non-functional queue/clear (2026-03-08)
 - Fixed `GET /api/queue/:zone_id` — was calling `_transport.get_queue()` which does not exist in `RoonApiTransport`; replaced with `_transport.subscribe_queue(zone_id, 100, cb)` which is the actual API method. Callback signature is `(response, msg)` where `response="Subscribed"` on first call and `msg.items` contains the queue. A `done` flag ignores subsequent change notifications.

@@ -159,6 +159,8 @@ The status endpoint gives you a live view of every zone:
 
 ## The REST API
 
+**Playback:**
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/status` | Connection status + now playing across all zones |
@@ -173,6 +175,18 @@ The status endpoint gives you a live view of every zone:
 | POST | `/api/shuffle` | Enable/disable shuffle `{ zone_id, shuffle }` |
 | GET | `/api/queue/:zone_id` | View the current queue |
 | GET | `/api/inspect?q=<query>` | Debug: show Roon's exact action names for a track |
+
+**Multi-room & zone control:**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/mute` | Mute or unmute a zone `{ zone_id, mute }` |
+| POST | `/api/mute/all` | Mute or unmute every zone `{ mute }` |
+| POST | `/api/pause/all` | Pause all zones simultaneously |
+| POST | `/api/standby` | Toggle standby on a zone's output `{ zone_id }` |
+| POST | `/api/group` | Group zones for synchronised playback `{ zone_ids[] }` |
+| POST | `/api/ungroup` | Ungroup zones `{ zone_ids[] }` |
+| POST | `/api/transfer` | Move queue from one zone to another `{ from_zone_id, to_zone_id }` |
 
 ### Playing albums with /api/play-album
 
@@ -212,6 +226,26 @@ curl -X POST http://YOUR_NAS_IP:3001/api/find-and-play \
 ```json
 { "success": true, "playing": "Roxanne — The Police, Sting", "action": "list" }
 ```
+
+#### Avoiding cover versions
+
+One subtlety worth knowing: Roon's search often ranks cover recordings and live versions above the original artist, especially for well-known tracks. The extension handles this with an optional `artist` field:
+
+```bash
+curl -X POST http://YOUR_NAS_IP:3001/api/find-and-play \
+  -H "Content-Type: application/json" \
+  -d '{
+    "zone_id": "YOUR_ZONE_ID",
+    "query": "The Sound of Silence Simon and Garfunkel",
+    "type": "Tracks",
+    "artist": "Simon & Garfunkel",
+    "action": "Play Now"
+  }'
+```
+
+When `artist` is present, the API does a case-insensitive match against Roon's artist field and picks the first result where the artist name appears — skipping orchestral covers, tribute acts, and live recordings by other artists. If no match is found it falls back to Roon's top result, so including `artist` is always safe.
+
+The same field works on individual entries in the `/api/playlist` tracks array.
 
 #### Roon's exact action labels
 
@@ -254,11 +288,15 @@ curl -X POST http://YOUR_NAS_IP:3001/api/playlist \
 }
 ```
 
-#### A word on "Add to Playlist"
+#### A word on what the Extension API can't do
 
-One thing I discovered the hard way: **Roon's Extension API does not expose playlist management to third-party extensions**. No "Add to Playlist", no "Create Playlist" — only playback actions (Play Now, Add Next, Queue, Start Radio) are available regardless of which browse hierarchy you navigate.
+Digging into the API reveals a few firm limitations worth knowing before you try to work around them:
 
-This isn't a bug in the extension — it's a deliberate limitation of the Extension API. The workaround is the queue-then-save pattern: queue your tracks via the API, then in the Roon app go **Queue → ⋮ → Save Queue as Playlist** to give it a permanent name. One tap.
+**Playlist management** — The Extension API does not expose "Add to Playlist" or "Create Playlist" to third-party extensions. Only playback actions are available. Workaround: queue your tracks via the API, then in the Roon app go **Queue → ⋮ → Save Queue as Playlist**. One tap.
+
+**Queue clearing** — There is no direct way to clear the queue via the Extension API. The `hierarchy:'browse'` root has no Queue item, and `hierarchy:'queue'` returns `InvalidHierarchy`. The only way to replace the queue is to use `Play Now` on any track or album — it atomically clears and replaces the queue in one step.
+
+**Profile switching** — User profiles are per-Roon-Remote (the phone/tablet app) and cannot be changed by an extension. You can read the profile list, but not switch the active one.
 
 ### Transport and volume
 
@@ -362,13 +400,39 @@ categories.forEach(cat => {
 
 ---
 
+## Multi-room control
+
+The extension exposes the full set of `RoonApiTransport` zone management methods, so Claude can handle multi-room requests naturally:
+
+```bash
+# Sync the kitchen and living room
+curl -X POST http://YOUR_NAS_IP:3001/api/group \
+  -H "Content-Type: application/json" \
+  -d '{ "zone_ids": ["KITCHEN_ZONE_ID", "LIVING_ROOM_ZONE_ID"] }'
+
+# Move the queue from the living room to the office seamlessly
+curl -X POST http://YOUR_NAS_IP:3001/api/transfer \
+  -H "Content-Type: application/json" \
+  -d '{ "from_zone_id": "LIVING_ROOM_ZONE_ID", "to_zone_id": "OFFICE_ZONE_ID" }'
+
+# Mute just the kitchen
+curl -X POST http://YOUR_NAS_IP:3001/api/mute \
+  -H "Content-Type: application/json" \
+  -d '{ "zone_id": "KITCHEN_ZONE_ID", "mute": true }'
+
+# Pause everything at once
+curl -X POST http://YOUR_NAS_IP:3001/api/pause/all \
+  -H "Content-Type: application/json" -d '{}'
+```
+
+With the Cowork skill installed, all of this is available through natural language: "sync the kitchen and family room", "move the music to the office", "mute the kitchen", "pause everything".
+
 ## Possible Extensions
 
 A few ideas for taking this further:
 
 - **Now Playing webhook**: Use `subscribe_zones` to push zone state changes to Home Assistant, a dashboard, or any webhook endpoint
 - **Mood-based radio**: Feed the AI your listening history and let it construct a queue based on mood or energy level
-- **Multi-room sync**: Use the transport API's grouping support to sync zones together on demand
 - **Voice control**: Wrap the API with a HomeKit/Shortcuts integration for Siri control
 
 ---
