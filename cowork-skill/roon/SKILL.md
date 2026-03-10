@@ -26,8 +26,13 @@ http://YOUR_NAS_IP:3001/api
 
 ## CRITICAL: How to make API calls
 
-The method depends on your operating system. Python inside Cowork's sandbox typically
-cannot reach the NAS directly ("No route to host"), so you need to escape to the host.
+> ⚠️ **You are running in a sandboxed environment. You CANNOT reach `172.31.254.142`
+> directly.** Do NOT attempt direct HTTP calls, do NOT try `urllib`, do NOT try `curl`
+> from Python or bash. They will always fail with "No route to host" or similar.
+>
+> The ONLY way to reach the Roon API is via the **`osascript` tool**, which runs on the
+> Mac host outside the sandbox where the network is available. Use `osascript` for every
+> single API call — GET and POST.
 
 ---
 
