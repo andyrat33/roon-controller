@@ -26,21 +26,29 @@ http://YOUR_NAS_IP:3001/api
 
 ## CRITICAL: How to make API calls
 
-> ⚠️ **You are running in a sandboxed environment. You CANNOT reach `172.31.254.142`
-> directly.** Do NOT attempt direct HTTP calls, do NOT try `urllib`, do NOT try `curl`
-> from Python or bash. They will always fail with "No route to host" or similar.
+> ⚠️ **STOP. Read this before writing any code.**
 >
-> The ONLY way to reach the Roon API is via the **`osascript` tool**, which runs on the
-> Mac host outside the sandbox where the network is available. Use `osascript` for every
-> single API call — GET and POST.
+> You are running in a **Linux sandbox**. You CANNOT reach `172.31.254.142` directly.
+> Every one of these will fail — do not attempt them:
+> - `urllib.request.urlopen(...)` → 403 Forbidden / No route to host
+> - `requests.get(...)` → 403 Forbidden
+> - `curl` in bash or Python subprocess → 403 Forbidden
+> - Running `osascript` as a shell command → `/bin/sh: osascript: not found`
+>
+> **The ONLY working method is the Cowork `osascript` tool.**
+>
+> `osascript` is a **Cowork plugin tool** — you call it the same way you call
+> `web_search` or `python`. It is NOT a shell command. Do NOT run it in bash or
+> subprocess. Just call the tool directly with AppleScript as the input. The tool
+> executes on the Mac host outside the sandbox, where the network is available.
 
 ---
 
-### macOS — osascript (recommended)
+### macOS — call the osascript tool directly
 
-Use `osascript` to run AppleScript directly on the Mac host. Always use the **bash
-heredoc pattern** for POST requests — it writes JSON to a temp file and curls from it,
-handling apostrophes in track titles naturally (e.g. "Don't Stop Believin'",
+Call the `osascript` tool with AppleScript. Always use the **bash heredoc pattern**
+for POST requests — it writes JSON to a temp file and curls from it, handling
+apostrophes in track titles naturally (e.g. "Don't Stop Believin'",
 "It's Now or Never") with minimal quoting layers.
 
 **DO NOT** use `quoted form of` with a JSON string — apostrophes break the shell command.
@@ -198,8 +206,14 @@ Searches for the album, navigates Roon's full browse hierarchy (Search → Album
 Supports the same action strings: `Play Now`, `Queue`, `Add Next`, `Start Radio`.
 
 ```applescript
-set payload to "{\"zone_id\":\"YOUR_ZONE_ID\",\"query\":\"Arctic Monkeys AM\",\"action\":\"Play Now\"}"
-do shell script "echo " & quoted form of payload & " > /tmp/rp.json && curl -s -X POST http://YOUR_NAS_IP:3001/api/play-album -H 'Content-Type: application/json' -d @/tmp/rp.json"
+do shell script "cat > /tmp/roon_api.json << 'EOF'
+{
+  \"zone_id\": \"YOUR_ZONE_ID\",
+  \"query\": \"Arctic Monkeys AM\",
+  \"action\": \"Play Now\"
+}
+EOF
+curl -s -X POST http://YOUR_NAS_IP:3001/api/play-album -H 'Content-Type: application/json' -d @/tmp/roon_api.json"
 ```
 
 ---
@@ -340,13 +354,13 @@ Valid actions: `play`, `pause`, `stop`, `next`, `previous`, `toggle_play_pause`
 Set `shuffle` to `true` to enable, `false` to disable.
 
 ```applescript
-do shell script "python3 /dev/stdin <<'PYEOF'
-import json, subprocess
-payload = {'zone_id': '160170f12687683c6501b7831b991e9a2a49', 'shuffle': True}
-with open('/tmp/rp.json', 'w') as f: json.dump(payload, f)
-r = subprocess.run(['curl','-s','-X','POST','http://172.31.254.142:3001/api/shuffle','-H','Content-Type: application/json','-d','@/tmp/rp.json'], capture_output=True, text=True)
-print(r.stdout)
-PYEOF"
+do shell script "cat > /tmp/roon_api.json << 'EOF'
+{
+  \"zone_id\": \"YOUR_ZONE_ID\",
+  \"shuffle\": true
+}
+EOF
+curl -s -X POST http://YOUR_NAS_IP:3001/api/shuffle -H 'Content-Type: application/json' -d @/tmp/roon_api.json"
 ```
 
 ## queue/clear
