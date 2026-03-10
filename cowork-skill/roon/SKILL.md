@@ -33,9 +33,17 @@ cannot reach the NAS directly ("No route to host"), so you need to escape to the
 
 ### macOS — osascript (recommended)
 
-Use `osascript` to escape to the Mac host. Always use the **Python heredoc pattern** below
-for POST requests — it lets Python build and serialise the JSON, making it completely immune
-to apostrophes in track titles (e.g. "Don't Go Breaking My Heart", "It's Now or Never").
+Use the `osascript` tool to run AppleScript directly on the Mac host.
+
+> **CRITICAL — execution method:**
+> Run AppleScript code blocks using the **`osascript` tool only** — never wrap them in a
+> bash script. A bash wrapper (`osascript <<'EOF'...EOF`) runs in the Linux sandbox where
+> `osascript` is not found. The `osascript` tool bypasses the sandbox and runs directly on
+> the Mac host where the network and osascript are both available.
+
+Always use the **Python heredoc pattern** below for POST requests — it lets Python build
+and serialise the JSON, making it completely immune to apostrophes in track titles
+(e.g. "Don't Go Breaking My Heart", "It's Now or Never").
 
 **DO NOT** use `quoted form of` with a JSON string — AppleScript wraps it in single quotes,
 so any apostrophe in a track title will break the shell command.
