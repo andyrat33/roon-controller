@@ -710,6 +710,8 @@ app.post('/api/playlist', async (req, res) => {
   const results      = [];
   const ACTION_MAP   = { 'Add to Queue': 'Queue', 'Play Next': 'Add Next', 'Add to queue': 'Queue' };
 
+  console.log(`[playlist] START name="${name}" zone_id=${zone_id} tracks=${tracks.length}`);
+
   for (let i = 0; i < tracks.length; i++) {
     const { query, type = 'Tracks', artist } = tracks[i];
     if (!query) { results.push({ query, status: 'skipped', reason: 'missing query' }); continue; }
@@ -718,41 +720,57 @@ app.post('/api/playlist', async (req, res) => {
     const roonAction = ACTION_MAP[action] || action;
     const msKey     = `pl-${Date.now()}-${Math.random()}`;
 
+    console.log(`[playlist] track[${i}] query="${query}" type=${type} roonAction="${roonAction}" artist="${artist||''}" msKey=${msKey}`);
+
     await new Promise(resolve => {
       _browse.browse({ hierarchy: 'search', input: query, multi_session_key: msKey }, (err) => {
-        if (err) { results.push({ query, status: 'error', reason: String(err) }); return resolve(); }
+        if (err) { console.log(`[playlist] track[${i}] ERROR browse search: ${err}`); results.push({ query, status: 'error', reason: String(err) }); return resolve(); }
 
         _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 100, offset: 0 }, (err, topR) => {
-          if (err) { results.push({ query, status: 'error', reason: String(err) }); return resolve(); }
+          if (err) { console.log(`[playlist] track[${i}] ERROR load categories: ${err}`); results.push({ query, status: 'error', reason: String(err) }); return resolve(); }
 
+          console.log(`[playlist] track[${i}] categories: ${(topR.items||[]).map(it=>it.title).join(', ')}`);
           const cat = (topR.items || []).find(it => it.title === type);
-          if (!cat) { results.push({ query, status: 'error', reason: `Category "${type}" not found` }); return resolve(); }
+          if (!cat) {
+            console.log(`[playlist] track[${i}] ERROR category "${type}" not found`);
+            results.push({ query, status: 'error', reason: `Category "${type}" not found` }); return resolve();
+          }
 
           _browse.browse({ hierarchy: 'search', item_key: cat.item_key, multi_session_key: msKey }, (err) => {
-            if (err) { results.push({ query, status: 'error', reason: String(err) }); return resolve(); }
+            if (err) { console.log(`[playlist] track[${i}] ERROR browse category: ${err}`); results.push({ query, status: 'error', reason: String(err) }); return resolve(); }
 
             _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 50, offset: 0 }, (err, catR) => {
-              if (err) { results.push({ query, status: 'error', reason: String(err) }); return resolve(); }
+              if (err) { console.log(`[playlist] track[${i}] ERROR load results: ${err}`); results.push({ query, status: 'error', reason: String(err) }); return resolve(); }
 
               const catItems = catR.items || [];
+              console.log(`[playlist] track[${i}] candidates (${catItems.length}): ${catItems.slice(0,5).map(c=>`"${c.title}"/"${c.subtitle}"`).join(' | ')}`);
               const target = pickBestMatch(catItems, 0, artist);
+              console.log(`[playlist] track[${i}] selected: "${target?.title}" / "${target?.subtitle}"`);
               if (!target) { results.push({ query, status: 'not_found' }); return resolve(); }
 
               const trackLabel = `${target.title} — ${target.subtitle}`;
 
               _browse.browse({ hierarchy: 'search', item_key: target.item_key, zone_or_output_id: zone_id, multi_session_key: msKey }, (err, r) => {
-                if (err) { results.push({ query, track: trackLabel, status: 'error', reason: String(err) }); return resolve(); }
-                if (r.action !== 'list') { results.push({ query, track: trackLabel, status: 'queued', action: r.action }); return resolve(); }
+                if (err) { console.log(`[playlist] track[${i}] ERROR browse track: ${err}`); results.push({ query, track: trackLabel, status: 'error', reason: String(err) }); return resolve(); }
+                console.log(`[playlist] track[${i}] browse-track returned action="${r.action}"`);
+                if (r.action !== 'list') {
+                  console.log(`[playlist] track[${i}] WARNING: action="${r.action}" — no play action executed (auto_action path)`);
+                  results.push({ query, track: trackLabel, status: 'auto_action', action: r.action }); return resolve();
+                }
 
                 _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 10, offset: 0 }, (err, actionR) => {
-                  if (err) { results.push({ query, track: trackLabel, status: 'error', reason: String(err) }); return resolve(); }
+                  if (err) { console.log(`[playlist] track[${i}] ERROR load action list: ${err}`); results.push({ query, track: trackLabel, status: 'error', reason: String(err) }); return resolve(); }
 
+                  console.log(`[playlist] track[${i}] action list: ${(actionR.items||[]).map(it=>`"${it.title}"(hint=${it.hint})`).join(', ')}`);
                   const directAction = (actionR.items || []).find(it => it.title === roonAction);
                   const isIntermediate = !directAction && (actionR.items||[]).length > 0 && actionR.items[0].hint === 'action_list';
+                  console.log(`[playlist] track[${i}] directAction=${!!directAction} isIntermediate=${isIntermediate} looking for "${roonAction}"`);
 
                   const execAction = (actionItem) => {
+                    console.log(`[playlist] track[${i}] execAction "${actionItem.title}" item_key=${actionItem.item_key}`);
                     _browse.browse({ hierarchy: 'search', item_key: actionItem.item_key, zone_or_output_id: zone_id, multi_session_key: msKey }, (err, playR) => {
-                      if (err) { results.push({ query, track: trackLabel, status: 'error', reason: String(err) }); return resolve(); }
+                      if (err) { console.log(`[playlist] track[${i}] ERROR execAction: ${err}`); results.push({ query, track: trackLabel, status: 'error', reason: String(err) }); return resolve(); }
+                      console.log(`[playlist] track[${i}] execAction result: roon_action="${playR.action}"`);
                       results.push({ query, track: trackLabel, status: 'queued', action: roonAction, roon_action: playR.action });
                       resolve();
                     });
@@ -762,10 +780,12 @@ app.post('/api/playlist', async (req, res) => {
 
                   if (isIntermediate) {
                     const mid = actionR.items[0];
-                    _browse.browse({ hierarchy: 'search', item_key: mid.item_key, multi_session_key: msKey }, (err) => {
-                      if (err) { results.push({ query, track: trackLabel, status: 'error', reason: String(err) }); return resolve(); }
+                    console.log(`[playlist] track[${i}] intermediate: browsing into "${mid.title}" item_key=${mid.item_key}`);
+                    _browse.browse({ hierarchy: 'search', item_key: mid.item_key, zone_or_output_id: zone_id, multi_session_key: msKey }, (err) => {
+                      if (err) { console.log(`[playlist] track[${i}] ERROR intermediate browse: ${err}`); results.push({ query, track: trackLabel, status: 'error', reason: String(err) }); return resolve(); }
                       _browse.load({ hierarchy: 'search', multi_session_key: msKey, count: 15, offset: 0 }, (err, actionR2) => {
-                        if (err) { results.push({ query, track: trackLabel, status: 'error', reason: String(err) }); return resolve(); }
+                        if (err) { console.log(`[playlist] track[${i}] ERROR intermediate load: ${err}`); results.push({ query, track: trackLabel, status: 'error', reason: String(err) }); return resolve(); }
+                        console.log(`[playlist] track[${i}] intermediate action list: ${(actionR2.items||[]).map(it=>it.title).join(', ')}`);
                         const pa2 = (actionR2.items || []).find(it => it.title === roonAction);
                         if (!pa2) { results.push({ query, track: trackLabel, status: 'error', reason: `Action "${roonAction}" not found`, available: actionR2.items.map(it=>it.title) }); return resolve(); }
                         execAction(pa2);
@@ -774,6 +794,7 @@ app.post('/api/playlist', async (req, res) => {
                     return;
                   }
 
+                  console.log(`[playlist] track[${i}] ERROR action "${roonAction}" not found in list`);
                   results.push({ query, track: trackLabel, status: 'error', reason: `Action "${roonAction}" not found`, available: (actionR.items||[]).map(it=>it.title) });
                   resolve();
                 });
@@ -784,10 +805,11 @@ app.post('/api/playlist', async (req, res) => {
       });
     });
 
-    if (i < tracks.length - 1) await new Promise(r => setTimeout(r, 2000));
+    if (i < tracks.length - 1) await new Promise(r => setTimeout(r, 50));
   }
 
   const queued = results.filter(r => r.status === 'queued').length;
+  console.log(`[playlist] DONE queued=${queued}/${tracks.length} results=${JSON.stringify(results)}`);
   res.json({
     name,
     note: 'Tracks queued successfully. To save as a Roon playlist: Queue → ⋮ → Save Queue as Playlist.',
