@@ -496,63 +496,50 @@ Range 0–100. `how`: `absolute`, `relative`, `relative_step`
 
 ## Playlist pattern
 
-### Option A — /api/playlist (recommended for multi-track lists)
+> ⚠️ **Do NOT use `/api/playlist`.** It silently fails — no error response, just an
+> empty queue. Use the Python loop pattern below for all multi-track queuing.
 
-Queues all tracks in one API call. First track plays immediately, rest are queued.
-To save as a permanent Roon playlist: **Queue → ⋮ → Save Queue as Playlist**.
+### Recommended — Python loop over find-and-play
 
-> **Note:** Roon's Extension API does not expose "Add to Playlist" to third-party
-> extensions — only playback actions are available. The queue-then-save workflow
-> is the supported path.
+Queue each track individually using a Python loop. First track uses `Play Now`
+(clears the queue and starts playback), subsequent tracks use `Queue`.
+A 0.05s delay between calls is sufficient.
 
-```json
-POST /api/playlist
-{
-  "name": "My 1988 Mix",
-  "zone_id": "YOUR_ZONE_ID",
-  "tracks": [
-    { "query": "The Sound of Silence Simon and Garfunkel", "artist": "Simon & Garfunkel" },
-    { "query": "Mrs Robinson Simon and Garfunkel",        "artist": "Simon & Garfunkel" },
-    { "query": "Hotel California Eagles",                 "artist": "Eagles" }
-  ]
-}
-```
-
-Include `"artist"` in each track entry to prevent cover versions from being selected.
-The value is matched case-insensitively against Roon's artist field. Omitting it falls
-back to Roon's top result.
-
-Use **Python + subprocess** — same pattern as single-track playback, but with a list
-of tracks in the payload. Python handles apostrophes natively; `json.dumps()` serialises
-the whole structure correctly in one step.
+Always include `"artist"` to prevent cover versions. Put only the **song title** in
+`query` — do NOT include the artist name there (tribute/karaoke tracks embed the
+original artist in their title, making them rank above originals).
 
 ```applescript
 do shell script "python3 /dev/stdin << 'PYEOF'
-import json, subprocess
-payload = {
-    'name': 'My 1988 Mix',
-    'zone_id': 'YOUR_ZONE_ID',
-    'tracks': [
-        {'query': 'The Sound of Silence', 'artist': 'Simon & Garfunkel'},
-        {'query': 'Mrs Robinson',         'artist': 'Simon & Garfunkel'},
-        {'query': \"Don't You Want Me\",  'artist': 'Human League'},
-        {'query': 'Hotel California',     'artist': 'Eagles'},
-    ]
-}
-r = subprocess.run(['curl','-s','-X','POST','http://YOUR_NAS_IP:3001/api/playlist','-H','Content-Type: application/json','-d',json.dumps(payload)], capture_output=True, text=True, timeout=30)
-print(r.stdout)
+import json, subprocess, time
+
+zone_id = 'YOUR_ZONE_ID'
+tracks = [
+    ('The Sound of Silence', 'Simon & Garfunkel'),
+    (\"Don't You Want Me\",   'Human League'),
+    ('Hotel California',     'Eagles'),
+]
+
+for i, (song, artist) in enumerate(tracks):
+    payload = {
+        'zone_id': zone_id,
+        'query': song,
+        'type': 'Tracks',
+        'artist': artist,
+        'action': 'Play Now' if i == 0 else 'Queue'
+    }
+    subprocess.run(
+        ['curl','-s','-X','POST','http://YOUR_NAS_IP:3001/api/find-and-play',
+         '-H','Content-Type: application/json','-d',json.dumps(payload)],
+        capture_output=True, text=True, timeout=5
+    )
+    time.sleep(0.05)
+
+print(f'Queued {len(tracks)} tracks')
 PYEOF"
 ```
 
-### Option B — chain individual find-and-play calls (alternative)
-
-If the payload would be very large, chain individual `find-and-play` calls via `&&`.
-**Only use this when none of the track names or artists contain apostrophes** — inline
-JSON in shell single quotes is terminated by any `'` character.
-
-```applescript
-do shell script "curl -s -X POST http://YOUR_NAS_IP:3001/api/find-and-play -H 'Content-Type: application/json' -d '{\"zone_id\":\"YOUR_ZONE_ID\",\"query\":\"Song One\",\"type\":\"Tracks\",\"artist\":\"Artist One\",\"action\":\"Play Now\"}' && curl -s -X POST http://YOUR_NAS_IP:3001/api/find-and-play -H 'Content-Type: application/json' -d '{\"zone_id\":\"YOUR_ZONE_ID\",\"query\":\"Song Two\",\"type\":\"Tracks\",\"artist\":\"Artist Two\",\"action\":\"Queue\"}'"
-```
+To save as a permanent Roon playlist after queuing: **Queue → ⋮ → Save Queue as Playlist**.
 
 ---
 
