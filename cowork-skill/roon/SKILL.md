@@ -530,37 +530,40 @@ Include `"artist"` in each track entry to prevent cover versions from being sele
 The value is matched case-insensitively against Roon's artist field. Omitting it falls
 back to Roon's top result.
 
-Use AppleScript to call it — write the payload to a shell script to handle
-any apostrophes in track titles:
+Use a **single bash heredoc** to write the JSON to a file then curl it. This is the
+only approach that handles apostrophes in track names correctly without hitting
+AppleScript parser limits:
 
 ```applescript
-do shell script "cat > /tmp/roon_pl.sh << 'EOF'
-#!/bin/bash
-printf '{\"name\":\"My Playlist\",\"zone_id\":\"YOUR_ZONE_ID\",\"tracks\":[{\"query\":\"Song One Artist\"},{\"query\":\"Song Two Artist\"}]}' > /tmp/rp.json
-curl -s -X POST http://YOUR_NAS_IP:3001/api/playlist -H 'Content-Type: application/json' -d @/tmp/rp.json
-EOF
-bash /tmp/roon_pl.sh"
-```
-
-### Option B — individual find-and-play calls (for short lists or fine control)
-
-First track → `Play Now` (starts playback, clears existing queue).
-All subsequent tracks → `Queue`. Use `delay 2` between calls.
-
-```applescript
-set zone to "YOUR_ZONE_ID"
-set api to "http://YOUR_NAS_IP:3001/api/find-and-play"
-set tracks to {¬
-  {"Song One Artist One", "Play Now"}, ¬
-  {"Song Two Artist Two", "Queue"}, ¬
-  {"Song Three Artist Three", "Queue"} ¬
+do shell script "cat > /tmp/roon_api.json << 'EOF'
+{
+  \"name\": \"My 1988 Mix\",
+  \"zone_id\": \"YOUR_ZONE_ID\",
+  \"tracks\": [
+    {\"query\": \"The Sound of Silence\", \"artist\": \"Simon & Garfunkel\"},
+    {\"query\": \"Mrs Robinson\",         \"artist\": \"Simon & Garfunkel\"},
+    {\"query\": \"Hotel California\",     \"artist\": \"Eagles\"}
+  ]
 }
-repeat with t in tracks
-  set payload to "{\"zone_id\":\"" & zone & "\",\"query\":\"" & item 1 of t & "\",\"type\":\"Tracks\",\"action\":\"" & item 2 of t & "\"}"
-  do shell script "echo " & quoted form of payload & " > /tmp/rp.json && curl -s -X POST " & api & " -H 'Content-Type: application/json' -d @/tmp/rp.json"
-  delay 2
-end repeat
+EOF
+curl -s -X POST http://YOUR_NAS_IP:3001/api/playlist -H 'Content-Type: application/json' -d @/tmp/roon_api.json"
 ```
+
+> **Do NOT use nested heredocs** (heredoc inside a heredoc) — AppleScript's parser
+> fails with `A property can't go after this """. (-2740)`. One heredoc level only.
+
+### Option B — chain individual find-and-play calls (for long lists or when /api/playlist isn't suitable)
+
+Chain multiple curl calls with `&&` inside a single `do shell script`. First track uses
+`Play Now`, subsequent tracks use `Queue`. This avoids all heredoc nesting issues and
+handles any payload size.
+
+```applescript
+do shell script "curl -s -X POST http://YOUR_NAS_IP:3001/api/find-and-play -H 'Content-Type: application/json' -d '{\"zone_id\":\"YOUR_ZONE_ID\",\"query\":\"Song One\",\"type\":\"Tracks\",\"artist\":\"Artist One\",\"action\":\"Play Now\"}' && curl -s -X POST http://YOUR_NAS_IP:3001/api/find-and-play -H 'Content-Type: application/json' -d '{\"zone_id\":\"YOUR_ZONE_ID\",\"query\":\"Song Two\",\"type\":\"Tracks\",\"artist\":\"Artist Two\",\"action\":\"Queue\"}' && curl -s -X POST http://YOUR_NAS_IP:3001/api/find-and-play -H 'Content-Type: application/json' -d '{\"zone_id\":\"YOUR_ZONE_ID\",\"query\":\"Song Three\",\"type\":\"Tracks\",\"artist\":\"Artist Three\",\"action\":\"Queue\"}'"
+```
+
+> **Do NOT use multi-line AppleScript with `¬`** — line continuations break when the
+> script is passed as a single `-e` argument to osascript. Keep everything on one line.
 
 ---
 
