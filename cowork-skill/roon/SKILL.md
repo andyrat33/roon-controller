@@ -33,39 +33,19 @@ cannot reach the NAS directly ("No route to host"), so you need to escape to the
 
 ### macOS — osascript (recommended)
 
-Use the `osascript` tool to run AppleScript directly on the Mac host.
-
-> **CRITICAL — execution method:**
-> Run AppleScript code blocks using the **`osascript` tool only** — never wrap them in a
-> bash script. A bash wrapper (`osascript <<'EOF'...EOF`) runs in the Linux sandbox where
-> `osascript` is not found. The `osascript` tool bypasses the sandbox and runs directly on
-> the Mac host where the network and osascript are both available.
-
-Always use the **Python heredoc pattern** below for POST requests — it lets Python build
-and serialise the JSON, making it completely immune to apostrophes in track titles
-(e.g. "Don't Go Breaking My Heart", "It's Now or Never").
-
-**DO NOT** use `quoted form of` with a JSON string — AppleScript wraps it in single quotes,
-so any apostrophe in a track title will break the shell command.
+Use `curl` via `osascript`. Write JSON payloads to `/tmp/rp.json` to avoid apostrophe
+quoting issues in track titles (e.g. "Don't Stand So Close To Me").
 
 **GET:**
 ```applescript
 do shell script "curl -s 'http://YOUR_NAS_IP:3001/api/status'"
 ```
 
-**POST — always use this Python heredoc pattern:**
+**POST:**
 ```applescript
-do shell script "python3 /dev/stdin <<'PYEOF'
-import json, subprocess
-payload = {'zone_id': 'YOUR_ZONE_ID', 'query': \"Don't Go Breaking My Heart\", 'type': 'Tracks', 'action': 'Play Now'}
-with open('/tmp/rp.json', 'w') as f: json.dump(payload, f)
-r = subprocess.run(['curl','-s','-X','POST','http://YOUR_NAS_IP:3001/api/find-and-play','-H','Content-Type: application/json','-d','@/tmp/rp.json'], capture_output=True, text=True)
-print(r.stdout)
-PYEOF"
+set payload to "{\"zone_id\":\"YOUR_ZONE_ID\",\"query\":\"Kate Bush Running Up That Hill\",\"type\":\"Tracks\",\"action\":\"Play Now\"}"
+do shell script "echo " & quoted form of payload & " > /tmp/rp.json && curl -s -X POST http://YOUR_NAS_IP:3001/api/find-and-play -H 'Content-Type: application/json' -d @/tmp/rp.json"
 ```
-
-Python handles all quoting internally — apostrophes and special characters in track titles
-are safe. The same pattern works for all POST endpoints; just change the URL and payload dict.
 
 > All `osascript` / AppleScript code blocks in this file are **macOS only**.
 
