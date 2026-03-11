@@ -159,13 +159,20 @@ PYEOF"
 - The Roon Extension API does **not** support profile switching. Profiles are tied to Roon Remotes (apps on phones/tablets), and the Extension API runs as a separate client — it cannot change the active profile for any Roon Remote. The `/api/profiles` endpoint can read the profile list but not switch. Profiles in this setup: James, House, Anne, Andrew, Claude.
 - Roon's internal action strings are case-sensitive. Use exactly: `Play Now`, `Queue`, `Add Next`, `Start Radio`.
 - Browse sessions use `multi_session_key` to keep `item_key` values valid across multiple browse/load calls within the same search context.
-- The `/api/standby` endpoint (`toggle_standby`) returned `InvalidRequest` in one test against the Hegel zone, but zone state data shows `"supports_standby":true` and `"status":"standby"` for the Hegel output — so the amp does support standby at the Roon level. The failure may have been transient or context-dependent. Needs re-testing.
+- The `/api/standby` endpoint requires `control_key` from the output's `source_controls` — passing `{}` causes `InvalidRequest`. The endpoint now finds the first `source_control` with `supports_standby: true` and passes its `control_key` automatically. Confirmed working: Hegel H390 enters standby correctly.
 
 ---
 
 ## Change History
 
-### Standby test on Hegel — confirmed not supported (2026-03-10)
+### Fix /api/standby: pass control_key to toggle_standby (2026-03-11)
+- Root cause of `InvalidRequest`: `toggle_standby` requires `{ control_key }` in the options object; we were passing `{}`
+- Fix: find the first `source_control` with `supports_standby: true` on the output, pass its `control_key`
+- Added 400 response if no standby-capable source_control exists
+- Confirmed working: Hegel H390 enters standby correctly
+- SSH access to QNAP now set up (`Host qnap` in `~/.ssh/config`); deploy command: `scp extension.js qnap:/share/Container/roon-controller/extension.js && ssh qnap "/share/ZFS531_DATA/.qpkg/container-station/bin/docker restart roon-controller"`
+
+### Standby test on Hegel — initial test showed InvalidRequest (2026-03-10)
 - Tested `POST /api/standby` against the Hegel zone (`1601263ad0b4da78019b79485617433fd073`)
 - Roon returns `{"error":"InvalidRequest"}` (HTTP 500) — `toggle_standby` is rejected for this output
 - The Hegel amp does not expose standby control through the Roon Extension API
