@@ -577,7 +577,9 @@ app.post('/api/standby', (req, res) => {
   const zone = _zones[zone_id];
   const output = zone?.outputs?.[0];
   if (!output) return res.status(404).json({ error: 'Zone or output not found' });
-  _transport.toggle_standby(output, {}, (err) => {
+  const sc = (output.source_controls || []).find(s => s.supports_standby);
+  if (!sc) return res.status(400).json({ error: 'Output does not support standby' });
+  _transport.toggle_standby(output, { control_key: sc.control_key }, (err) => {
     if (err) return res.status(500).json({ error: String(err) });
     res.json({ success: true });
   });
