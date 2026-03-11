@@ -503,6 +503,13 @@ Always include `"artist"` per track to prevent cover versions. Put only the
 **song title** in `query` — do NOT include the artist name there (tribute/karaoke
 tracks embed the original artist in their title, making them rank above originals).
 
+> ⚠️ **This call is long-running.** For a 20-track playlist it takes ~5 seconds.
+> The first song starting to play does NOT mean the call is finished — the
+> endpoint is still queuing the remaining tracks in the background.
+> **Call this endpoint exactly once and wait for the full JSON response.**
+> Calling it a second time will trigger a new "Play Now" and clear the queue.
+> Success: `"queued" === "total"` in the response.
+
 ```applescript
 do shell script "python3 /dev/stdin << 'PYEOF'
 import json, subprocess

@@ -165,6 +165,11 @@ PYEOF"
 
 ## Change History
 
+### Fix /api/playlist double-call by Haiku (2026-03-11)
+- Root cause: Haiku called `/api/playlist` twice per request (confirmed in docker logs: 2× `[playlist] START` per playlist). The second call's `Play Now` for track[0] cleared the queue built by the first call, causing the "songs skipped / restarts" glitch.
+- The extension was working correctly — the bug was Haiku issuing a redundant second call, likely because the request takes ~5s for a 20-track playlist and Haiku treated the first song starting to play as a completion signal.
+- Fix: added an `⚠️` warning block in `cowork-skill/roon/SKILL.md` immediately before the Option A code example, stating: the call is long-running, playback starting ≠ call done, call exactly once, a second call clears the queue, success = `queued === total`.
+
 ### Fix /api/standby: pass control_key to toggle_standby (2026-03-11)
 - Root cause of `InvalidRequest`: `toggle_standby` requires `{ control_key }` in the options object; we were passing `{}`
 - Fix: find the first `source_control` with `supports_standby: true` on the output, pass its `control_key`
