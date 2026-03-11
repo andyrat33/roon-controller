@@ -159,7 +159,7 @@ PYEOF"
 - The Roon Extension API does **not** support profile switching. Profiles are tied to Roon Remotes (apps on phones/tablets), and the Extension API runs as a separate client — it cannot change the active profile for any Roon Remote. The `/api/profiles` endpoint can read the profile list but not switch. Profiles in this setup: James, House, Anne, Andrew, Claude.
 - Roon's internal action strings are case-sensitive. Use exactly: `Play Now`, `Queue`, `Add Next`, `Start Radio`.
 - Browse sessions use `multi_session_key` to keep `item_key` values valid across multiple browse/load calls within the same search context.
-- The `/api/standby` endpoint (`toggle_standby`) returns `InvalidRequest` for the Hegel zone — the Hegel amp output does not support standby via the Roon Extension API. The endpoint may work for other output types.
+- The `/api/standby` endpoint (`toggle_standby`) returned `InvalidRequest` in one test against the Hegel zone, but zone state data shows `"supports_standby":true` and `"status":"standby"` for the Hegel output — so the amp does support standby at the Roon level. The failure may have been transient or context-dependent. Needs re-testing.
 
 ---
 
