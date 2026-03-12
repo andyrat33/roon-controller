@@ -165,6 +165,14 @@ PYEOF"
 
 ## Change History
 
+### Server-side idempotency guard for /api/playlist (2026-03-12)
+- SKILL.md warning (2026-03-11) was insufficient — needed a server-side fix
+- Added two-layer guard in `extension.js`:
+  - **Layer 1 (in-flight lock):** per-zone `_playlistInFlight` Map — rejects any concurrent second call with `409 reason: "in_flight"` while the first is still running
+  - **Layer 2 (payload dedup):** after completion, stores a hash of `zone_id + track queries` in `_playlistRecentHashes` with a 30s TTL — rejects identical requests within that window with `409 reason: "duplicate"` and `age_seconds`
+  - Lazy TTL cleanup on each request; lock always released in try/catch (failed calls are retryable, not hashed)
+- Confirmed working: 20-track playlist queued 20/20; immediate second call rejected with `{"reason":"duplicate","age_seconds":0}`
+
 ### Fix /api/playlist double-call by Haiku (2026-03-11)
 - Root cause: Haiku called `/api/playlist` twice per request (confirmed in docker logs: 2× `[playlist] START` per playlist). The second call's `Play Now` for track[0] cleared the queue built by the first call, causing the "songs skipped / restarts" glitch.
 - The extension was working correctly — the bug was Haiku issuing a redundant second call, likely because the request takes ~5s for a 20-track playlist and Haiku treated the first song starting to play as a completion signal.

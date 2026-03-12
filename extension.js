@@ -17,6 +17,10 @@ let _transport = null;
 let _status    = null;
 let _zones     = {};   // zone_id → zone object (kept live via subscription)
 
+const _playlistInFlight      = new Map();   // zone_id → true
+const _playlistRecentHashes  = new Map();   // hash → timestamp ms
+const PLAYLIST_DEDUP_TTL_MS  = 30_000;
+
 // ─── Roon Setup ───────────────────────────────────────────────
 const roon = new RoonApi({
   extension_id:    'com.cowork.roon-controller',
@@ -98,6 +102,10 @@ function pickBestMatch(items, index, artist) {
     if (match) return match;
   }
   return items[Math.min(index, items.length - 1)];
+}
+
+function playlistRequestHash(zone_id, tracks) {
+  return zone_id + '|' + tracks.map(t => `${t.query}::${t.type || 'Tracks'}`).join('||');
 }
 
 // ─── REST API ─────────────────────────────────────────────────
@@ -709,11 +717,35 @@ app.post('/api/playlist', async (req, res) => {
   if (!zone_id)                                 return res.status(400).json({ error: 'zone_id is required' });
   if (!Array.isArray(tracks) || !tracks.length) return res.status(400).json({ error: 'tracks[] is required' });
 
+  // Lazy TTL cleanup
+  const now = Date.now();
+  for (const [h, ts] of _playlistRecentHashes) {
+    if (now - ts > PLAYLIST_DEDUP_TTL_MS) _playlistRecentHashes.delete(h);
+  }
+
+  // Layer 1: in-flight check
+  if (_playlistInFlight.get(zone_id)) {
+    console.log(`[playlist] REJECTED (in-flight) zone_id=${zone_id}`);
+    return res.status(409).json({ error: 'A playlist operation is already in progress for this zone.', reason: 'in_flight', zone_id });
+  }
+
+  // Layer 2: duplicate payload check
+  const reqHash = playlistRequestHash(zone_id, tracks);
+  if (_playlistRecentHashes.has(reqHash)) {
+    const age = Math.round((now - _playlistRecentHashes.get(reqHash)) / 1000);
+    console.log(`[playlist] REJECTED (duplicate) zone_id=${zone_id} age=${age}s`);
+    return res.status(409).json({ error: `This playlist was already queued ${age}s ago. Call /api/playlist exactly once and wait for the full response.`, reason: 'duplicate', zone_id, age_seconds: age });
+  }
+
+  // Acquire lock
+  _playlistInFlight.set(zone_id, true);
+
   const results      = [];
   const ACTION_MAP   = { 'Add to Queue': 'Queue', 'Play Next': 'Add Next', 'Add to queue': 'Queue' };
 
   console.log(`[playlist] START name="${name}" zone_id=${zone_id} tracks=${tracks.length}`);
 
+  try {
   for (let i = 0; i < tracks.length; i++) {
     const { query, type = 'Tracks', artist } = tracks[i];
     if (!query) { results.push({ query, status: 'skipped', reason: 'missing query' }); continue; }
@@ -812,6 +844,8 @@ app.post('/api/playlist', async (req, res) => {
 
   const queued = results.filter(r => r.status === 'queued').length;
   console.log(`[playlist] DONE queued=${queued}/${tracks.length} results=${JSON.stringify(results)}`);
+  _playlistInFlight.delete(zone_id);
+  _playlistRecentHashes.set(reqHash, Date.now());
   res.json({
     name,
     note: 'Tracks queued successfully. To save as a Roon playlist: Queue → ⋮ → Save Queue as Playlist.',
@@ -819,6 +853,11 @@ app.post('/api/playlist', async (req, res) => {
     total: tracks.length,
     results
   });
+  } catch (err) {
+    _playlistInFlight.delete(zone_id);
+    console.log(`[playlist] EXCEPTION zone_id=${zone_id}: ${err}`);
+    res.status(500).json({ error: String(err) });
+  }
 });
 
 // ─── Play Album ──────────────────────────────────────────────
