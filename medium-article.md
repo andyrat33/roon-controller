@@ -260,9 +260,39 @@ This is the thing that trips everyone up. Roon uses its own internal action stri
 
 The `/api/inspect` endpoint was built specifically to debug this — it shows every action Roon offers at each navigation level for any track.
 
+#### Adding to the queue without replacing it
+
+This is a common source of confusion. If you want to **add tracks to an existing queue** without clearing what's already there, you must use `find-and-play` with `action: "Queue"` in a loop — one call per track:
+
+```bash
+for song in "Yesterday" "Help" "Blackbird"; do
+  curl -s -X POST http://YOUR_NAS_IP:3001/api/find-and-play \
+    -H "Content-Type: application/json" \
+    -d "{\"zone_id\":\"YOUR_ZONE_ID\",\"query\":\"$song\",\"type\":\"Tracks\",\"artist\":\"The Beatles\",\"action\":\"Queue\"}"
+  sleep 0.5
+done
+```
+
+Or in Python (recommended, handles apostrophes cleanly):
+
+```python
+import json, subprocess, time
+
+tracks = [('Yesterday', 'The Beatles'), ('Help!', 'The Beatles'), ('Jolene', 'Dolly Parton')]
+for song, artist in tracks:
+    payload = {'zone_id': 'YOUR_ZONE_ID', 'query': song, 'type': 'Tracks',
+               'artist': artist, 'action': 'Queue'}
+    subprocess.run(['curl','-s','-X','POST','http://YOUR_NAS_IP:3001/api/find-and-play',
+                    '-H','Content-Type: application/json','-d',json.dumps(payload)],
+                   capture_output=True, text=True, timeout=10)
+    time.sleep(0.5)
+```
+
+**Do NOT use `/api/playlist` for this** — it always calls `Play Now` for the first track, which clears the existing queue. `/api/playlist` is the right choice when you want to replace the queue with a fresh set of tracks. To add an entire album without replacing the queue, use `play-album` with `action: "Queue"`.
+
 ### Queuing playlists with /api/playlist
 
-The `/api/playlist` endpoint lets you queue a list of tracks in one API call. First track plays immediately, the rest are appended to the queue in order:
+The `/api/playlist` endpoint lets you queue a list of tracks in one API call. The first track plays immediately (replacing any existing queue), and the rest are appended in order:
 
 ```bash
 curl -X POST http://YOUR_NAS_IP:3001/api/playlist \
