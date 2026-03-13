@@ -165,6 +165,13 @@ PYEOF"
 
 ## Change History
 
+### Fix "add to queue" — SKILL.md guidance for preserving existing queue (2026-03-13)
+- Root cause: when asked to "add to the queue without replacing", Haiku used `/api/playlist`, which always calls `Play Now` for the first track and clears the existing queue
+- Fix: added a `CRITICAL — "Add to queue" vs "Play now"` section to `SKILL.md` immediately after the action labels table
+- Rule: "add to queue" must use `find-and-play` with `action: "Queue"` in a loop for every track — `/api/playlist` is explicitly called out as wrong for this use case
+- Same principle for albums: `play-album` with `action: "Queue"`
+- Confirmed working
+
 ### Server-side idempotency guard for /api/playlist (2026-03-12)
 - SKILL.md warning (2026-03-11) was insufficient — needed a server-side fix
 - Added two-layer guard in `extension.js`:

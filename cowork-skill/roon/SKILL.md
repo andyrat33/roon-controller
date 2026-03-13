@@ -254,6 +254,36 @@ These are the real strings Roon uses internally. Wrong names silently fall back 
 | Play after current track | `Add Next` ← **NOT** "Play Next" |
 | Start Roon Radio | `Start Radio` |
 
+### CRITICAL — "Add to queue" vs "Play now"
+
+When the user says **"add to the queue"**, **"queue these songs"**, **"don't replace what's playing"**, or any similar phrasing that implies preserving the existing queue:
+
+- **Use `find-and-play` with `action: "Queue"` for every track** — loop over tracks, first track gets `"Queue"` too
+- **Do NOT use `/api/playlist`** — it always calls `Play Now` for the first track, which clears the existing queue regardless of your intent
+
+Example loop for adding multiple artists' tracks without replacing the queue:
+
+```applescript
+do shell script "python3 /dev/stdin << 'PYEOF'
+import json, subprocess, time
+zone_id = 'YOUR_ZONE_ID'
+tracks = [
+    ('Yesterday', 'The Beatles'),
+    ('Help!', 'The Beatles'),
+    ('Jolene', 'Dolly Parton'),
+]
+for song, artist in tracks:
+    payload = {'zone_id': zone_id, 'query': song, 'type': 'Tracks', 'artist': artist, 'action': 'Queue'}
+    subprocess.run(['curl','-s','-X','POST','http://YOUR_NAS_IP:3001/api/find-and-play',
+                    '-H','Content-Type: application/json','-d',json.dumps(payload)],
+                   capture_output=True, text=True, timeout=10)
+    time.sleep(0.5)
+print('done')
+PYEOF"
+```
+
+Likewise, to **add an entire album** without replacing the queue, use `play-album` with `action: "Queue"`.
+
 ---
 
 ## Research-first strategy for complex queries
