@@ -165,6 +165,12 @@ PYEOF"
 
 ## Change History
 
+### Fix osascript timeout causing queue duplication on long loops (2026-03-14)
+- Root cause: SKILL.md loop example used `time.sleep(0.5)` between tracks. For 20 tracks this takes ~15s+, exceeding the Cowork osascript tool's ~10s timeout. osascript returned a "failure" but the Python process kept running in the background, successfully queuing all 20 tracks. Haiku retried ~5 times → ~100 tracks queued.
+- Fix 1: Changed `time.sleep(0.5)` → `time.sleep(0.05)` in the "Add to queue" loop example in SKILL.md
+- Fix 2: Added warning block to the loop section: if osascript appears to fail on a long loop, check `/api/queue/<zone_id>` before retrying — do NOT retry blindly
+- Fix 3: Added same "check queue before retrying" warning to the `/api/playlist` Option A section
+
 ### Fix "add to queue" — SKILL.md guidance for preserving existing queue (2026-03-13)
 - Root cause: when asked to "add to the queue without replacing", Haiku used `/api/playlist`, which always calls `Play Now` for the first track and clears the existing queue
 - Fix: added a `CRITICAL — "Add to queue" vs "Play now"` section to `SKILL.md` immediately after the action labels table

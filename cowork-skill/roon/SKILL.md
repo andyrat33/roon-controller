@@ -263,6 +263,15 @@ When the user says **"add to the queue"**, **"queue these songs"**, **"don't rep
 
 Example loop for adding multiple artists' tracks without replacing the queue:
 
+> ⚠️ **osascript timeout warning:** The `osascript` tool has a ~10 second timeout. For more
+> than ~8 tracks this loop will exceed the timeout and osascript will appear to "fail" — but
+> the Python process keeps running in the background and all tracks ARE still being queued.
+> **Do NOT retry if osascript returns an error on a long loop. Check `/api/queue/<zone_id>`
+> first** to see whether the tracks were queued successfully.
+>
+> Use `time.sleep(0.05)` not `time.sleep(0.5)` — the shorter delay keeps 20 tracks under
+> ~15 seconds total and avoids spurious timeout errors.
+
 ```applescript
 do shell script "python3 /dev/stdin << 'PYEOF'
 import json, subprocess, time
@@ -277,7 +286,7 @@ for song, artist in tracks:
     subprocess.run(['curl','-s','-X','POST','http://YOUR_NAS_IP:3001/api/find-and-play',
                     '-H','Content-Type: application/json','-d',json.dumps(payload)],
                    capture_output=True, text=True, timeout=10)
-    time.sleep(0.5)
+    time.sleep(0.05)
 print('done')
 PYEOF"
 ```
@@ -538,6 +547,11 @@ tracks embed the original artist in their title, making them rank above original
 > does NOT mean the call is finished — the endpoint is still queuing remaining
 > tracks. A second call within 30 seconds is rejected with HTTP 409 (server-side
 > idempotency guard). Success: `"queued" === "total"` in the response.
+>
+> If osascript appears to time out or return an error, **check `/api/queue/<zone_id>`
+> before retrying** — the playlist may have queued successfully in the background.
+> A duplicate call within 30s will be rejected with HTTP 409, but after 30s a
+> duplicate call will queue everything again.
 
 ```applescript
 do shell script "python3 /dev/stdin << 'PYEOF'
