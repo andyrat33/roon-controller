@@ -78,6 +78,18 @@ PYEOF"
 - Construct JSON by string concatenation across quoting layers — apostrophes corrupt the payload
 - Use nested heredocs (heredoc inside a heredoc) — AppleScript parser error `-2740`
 - Use multi-line AppleScript with `¬` — line continuations break as a single `-e` argument
+- Use double base64 encoding — do NOT base64-encode a script that already contains base64 data; the double-encoding corrupts the payload and causes `UnicodeDecodeError: 'utf-8' codec can't decode byte 0xc2`
+- Write long heredoc scripts (>~8 lines) — `do shell script` with a multi-line heredoc fails with AppleScript error `-2741` for longer scripts; use `/api/playlist` for multi-track work instead
+
+### CRITICAL — "Tool result missing" does NOT mean the call failed
+
+> ⚠️ If the osascript tool returns **`"Tool result missing due to internal error"`**, this
+> almost certainly means the osascript tool timed out (~10s) while your Python script was
+> still running in the background. **The tracks are likely already queued.**
+>
+> **Rule: After any ambiguous failure (tool timeout, "result missing", no response), ALWAYS
+> call `GET /api/queue/<zone_id>` and check the queue state before queuing anything else.**
+> Do NOT retry blindly — you will duplicate all the tracks you just queued.
 
 > All `osascript` / AppleScript code blocks in this file are **macOS only**.
 
@@ -534,6 +546,17 @@ Range 0–100. `how`: `absolute`, `relative`, `relative_step`
 ---
 
 ## Playlist pattern
+
+### When to use which approach
+
+| Situation | Use |
+|-----------|-----|
+| Playing/replacing queue with 1–100 tracks | `/api/playlist` — single API call, handles all quoting |
+| Adding to existing queue, ≤5 tracks | `find-and-play` loop with `action: "Queue"` |
+| Adding to existing queue, >5 tracks | `find-and-play` loop — osascript may timeout, **check queue before retrying** |
+| Playing an entire album | `/api/play-album` |
+
+**For large track counts always prefer `/api/playlist`** — it's a single osascript call (~5s for 20 tracks), handles quoting safely via `json.dumps()`, and has a server-side idempotency guard. The `find-and-play` loop is only needed when you must preserve an existing queue.
 
 ### Option A — /api/playlist (recommended for multi-track lists)
 

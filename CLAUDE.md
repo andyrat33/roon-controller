@@ -165,6 +165,16 @@ PYEOF"
 
 ## Change History
 
+### Postmortem: 100-track queue duplication on large playlist request (2026-03-14)
+- Root cause (Sonnet 4.6 postmortem): attempting 100 tracks via batched heredoc scripts triggered multiple failure modes simultaneously, causing 3× duplication of ~75 tracks
+- Failure 1: Long heredoc scripts (>~8 lines) fail with AppleScript error `-2741`. Root cause: `osascript -e` receives the whole script as a single command-line argument; multi-line heredocs break the AppleScript parser above a certain length.
+- Failure 2: Double base64 encoding — base64-encoding a script that already contains base64 data causes `UnicodeDecodeError: 'utf-8' codec can't decode byte 0xc2`. Only encode data, never the whole script.
+- Failure 3: `"Tool result missing due to internal error"` treated as hard failure. This almost always means osascript timed out while Python was still running in the background — tracks were being queued successfully. Retrying re-queued everything.
+- Failure 4: No queue state check before recovery. Resuming from incorrect assumptions about what had been queued caused further duplicates.
+- Fix 1: Added `DO NOT` rules to SKILL.md: no long heredocs (>~8 lines), no double base64
+- Fix 2: Added prominent `"Tool result missing" ≠ failed` warning — always check `/api/queue/<zone_id>` before retrying after any ambiguous failure
+- Fix 3: Added "When to use which approach" table to Playlist section — for large counts always prefer `/api/playlist` (single call, safe quoting, idempotency guard)
+
 ### Fix osascript timeout causing queue duplication on long loops (2026-03-14)
 - Root cause: SKILL.md loop example used `time.sleep(0.5)` between tracks. For 20 tracks this takes ~15s+, exceeding the Cowork osascript tool's ~10s timeout. osascript returned a "failure" but the Python process kept running in the background, successfully queuing all 20 tracks. Haiku retried ~5 times → ~100 tracks queued.
 - Fix 1: Changed `time.sleep(0.5)` → `time.sleep(0.05)` in the "Add to queue" loop example in SKILL.md
